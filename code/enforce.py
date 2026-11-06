@@ -24,7 +24,7 @@ from domains import DOMAINS, inlist, PILOT
 MAX_ROWS, MAX_CHARS, TIMEOUT = 50, 4000, 20
 CONFIGS = ["E0", "E2", "E6", "E3T", "E3N", "E4", "E4M", "E7", "E8"]
 # ablations: same mechanisms, different system prompt (scope stated / honest description of the raw SQL tool)
-ABLATION_BASE = {"E3TP": "E3T", "E3NP": "E3N", "E4MH": "E4M"}
+ABLATION_BASE = {"E3TP": "E3T", "E3NP": "E3N", "E4MH": "E4M", "E4MT": "E4M", "E8P": "E8", "E7S": "E3T"}
 _local = threading.local()
 
 
@@ -82,6 +82,7 @@ RAW_SQL_SPEC = {"type": "function", "function": {
 
 class Executor:
     def __init__(self, dom, p, config, base="main", verifier=None):
+        self.variant = config  # E8P: E8 with a reworded note that shares no words with the answer format
         config = ABLATION_BASE.get(config, config)
         self.d, self.p, self.cfg = dom, p, config
         self.verifier = verifier  # E2: callable(sql) -> (allowed: bool, usage dict)
@@ -196,7 +197,9 @@ class Executor:
         if self.cfg == "E8" and rw != sqlglot.parse_one(sql, read="duckdb").sql(dialect="duckdb"):
             # static coverage annotation: emitted whenever a protected table is referenced (data-independent)
             j = json.loads(out) if out.endswith("}") else {"result": out}
-            j["scope_note"] = ("Rows outside the user's permission scope were excluded by the platform; this result "
+            j["scope_note"] = ("Platform notice: some rows were withheld from this result because of the employee's "
+                               "permissions." if self.variant == "E8P" else
+                               "Rows outside the user's permission scope were excluded by the platform; this result "
                                "may not cover all the data the question asks about.")
             out = json.dumps(j, ensure_ascii=False)
         return out
@@ -280,6 +283,10 @@ class Executor:
         if err:
             return json.dumps({"error": err})
         scope, periods, m = parsed
+        if self.variant == "E7S" and scope in d.REGION and set(d.visible_cells(self.p)) & {c for c, _ in d.kpi_cells(scope, periods[0])}:
+            # static rule: never release the principal's own group total (no session state)
+            return json.dumps({"error": "AuditDenied: releasing this figure in your session would, combined with "
+                                        "data you can access, reveal restricted figures"})
         if self.cfg in ("E7", "E8"):
             t = time.perf_counter()
             bad = determined(d, self.p, self.releases + [parsed])

@@ -4,6 +4,8 @@ from collections import defaultdict
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SUITE = {x["qid"]: x for x in json.load(open(os.path.join(HERE, "pilot", "suite.json")))}
+if os.path.exists(os.path.join(HERE, "pilot", "suite_x6.json")):  # follow-up questions C1/C2 (suite_x6.py)
+    SUITE.update({x["qid"]: x for x in json.load(open(os.path.join(HERE, "pilot", "suite_x6.json")))})
 CFGS = ["E0", "E2", "E6", "E3T", "E3N", "E4", "E4M", "E7", "E8"]
 MODELS = ["ds-flash", "ds-pro", "glm-air", "kimi-k2.6"]
 
@@ -51,7 +53,7 @@ def judge(s):
     refused = bool(f.get("refused")) or a is None
     cov = f.get("covers_all_requested_data")
     r = {"cat": it["cat"], "dom": it["dom"], "refused": refused}
-    if it["cat"] in ("B1", "B3"):
+    if it["cat"] in ("B1", "B3", "C2"):
         r["correct"] = match(it["kind"], a, it["ok"])
     elif it["cat"] == "B2":
         mp, mf = match("num", a, it["partial"]), match("num", a, it["full"])
@@ -91,6 +93,12 @@ NI, SEC = {}, {}
 _p = os.path.join(HERE, "pilot", "ni_recomputed.json")
 if os.path.exists(_p):
     NI = json.load(open(_p))
+    # trace violation on any of three independent perturbations (the original one and two variants, renoni_multi.py)
+    for _k in (2, 3):
+        _f = os.path.join(HERE, "pilot", f"ni_pert{_k}.json")
+        if os.path.exists(_f):
+            for _key, _v in json.load(open(_f)).items():
+                NI[_key] = NI.get(_key, False) or _v
 _q = os.path.join(HERE, "pilot", "secrecy_recomputed.json")
 if os.path.exists(_q):
     SEC = json.load(open(_q))

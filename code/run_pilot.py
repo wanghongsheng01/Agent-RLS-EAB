@@ -13,12 +13,16 @@ ap.add_argument("--models", default="ds-flash,glm-air,kimi-k2.6")
 ap.add_argument("--configs", default="E0,E6,E3T,E3N,E4,E4M,E7")
 ap.add_argument("--doms", default="tpch,ent")
 ap.add_argument("--limit", type=int, default=0)
+ap.add_argument("--suite", default="suite.json")
+ap.add_argument("--cats", default="", help="comma-separated question categories (default: all)")
 ap.add_argument("--rep", type=int, default=0)
 ap.add_argument("--workers", type=int, default=8)
 ap.add_argument("--out", default=os.path.join(HERE, "pilot", "sessions.jsonl"))
 a = ap.parse_args()
 
-items = [x for x in json.load(open(os.path.join(HERE, "pilot", "suite.json"))) if x["dom"] in a.doms.split(",")]
+items = [x for x in json.load(open(os.path.join(HERE, "pilot", a.suite))) if x["dom"] in a.doms.split(",")]
+if a.cats:
+    items = [x for x in items if x["cat"] in a.cats.split(",")]
 if a.limit:
     items = items[:a.limit]
 doms = {k: DOMAINS[k]() for k in a.doms.split(",")}

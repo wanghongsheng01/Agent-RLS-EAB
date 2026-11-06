@@ -3,3 +3,5 @@ sqlglot==30.29.0
 numpy
 requests
 matplotlib
+pgserver
+psycopg[binary]

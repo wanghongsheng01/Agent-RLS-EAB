@@ -9,6 +9,8 @@ from score import load, SUITE, wilson, iter_sessions  # noqa: E402
 
 OUT = os.path.join(HERE, "paper_out")
 ALL = load(os.path.join(HERE, "pilot", "sessions.jsonl"))
+XALL = [r for r in ALL if r["cat"].startswith("C") or r["cfg"] == "E7S"]  # follow-up X6 (suite_x6.py), reported apart
+ALL = [r for r in ALL if not (r["cat"].startswith("C") or r["cfg"] == "E7S")]
 BAL_MODELS = {"ds-flash", "glm-air", "kimi-k2.6"}
 MAIN_CFGS = {"E0", "E2", "E6", "E3T", "E3N", "E4", "E4M", "E7", "E8"}
 rows = [r for r in ALL if r["model"] in BAL_MODELS and r["rep"] in (0, 1, 2) and r["cfg"] in MAIN_CFGS]
@@ -71,7 +73,7 @@ def mcnemar(c1, c2, key, pred):
 
 
 N = {}
-N["nSessions"] = f"{len(ALL):,}".replace(",", "{,}")
+N["nSessions"] = f"{len(ALL) + len(XALL):,}".replace(",", "{,}")  # every session, including the X6 follow-ups
 N["nSessionsMain"] = f"{len(rows):,}".replace(",", "{,}")
 N["nItems"] = str(len({r['qid'] for r in rows}))
 N["nPrincipals"] = str(len({(r['dom'], SUITE[r['qid']]['p']) for r in rows}))
@@ -103,10 +105,18 @@ ni = {c: rate(sel(c), "ni")[0] for c in CFGS}
 N["niPrompt"], N["niGuard"], N["niVerifier"] = f"{ni['E0']:.0f}", f"{ni['E6']:.0f}", f"{ni['E2']:.0f}"
 N["niDet"] = f"{max(ni[c] for c in ('E3T', 'E4', 'E7', 'E8')):.0f}"  # rounded maximum over Truman points
 N["niNT"] = f"{ni['E3N']:.0f}"
-_nij = json.load(open(os.path.join(HERE, "pilot", "ni_recomputed.json")))
+_nij = {k: v for k, v in json.load(open(os.path.join(HERE, "pilot", "ni_recomputed.json"))).items()
+        if not SUITE[k.split("|")[0]]["cat"].startswith("C") and k.split("|")[1] != "E7S"}  # X6 follow-ups apart
+_nij_alt = [json.load(open(os.path.join(HERE, "pilot", f"ni_pert{k}.json"))) for k in (2, 3)]
+_nij_new = {k: v for k, v in _nij.items() if not v and any(a.get(k) for a in _nij_alt)}  # found only by the variants
+_nij = {k: v or any(a.get(k) for a in _nij_alt) for k, v in _nij.items()}
+_nt = sum(1 for k in _nij_new if k.split("|")[1] in ("E3T", "E4", "E7", "E8"))
+N["niAltNewTruman"] = "none" if _nt == 0 else str(_nt)
+N["niAltNew"] = str(len(_nij_new))
+N["niAltNewNT"] = str(sum(1 for k in _nij_new if k.split("|")[1] == "E3N"))
 _tr = [v for k, v in _nij.items() if k.split("|")[1] in ("E3T", "E4", "E7", "E8")]
 N["niTrumanHits"], N["niTrumanN"] = str(sum(_tr)), f"{len(_tr):,}".replace(",", "{,}")
-_cls = json.load(open(os.path.join(HERE, "pilot", "ni_truman_classes.json")))
+_cls = {k: v for k, v in json.load(open(os.path.join(HERE, "pilot", "ni_truman_classes.json"))).items() if k in _nij}
 N["niSel"] = str(sum(v == "selection" for v in _cls.values()))
 N["niEnv"] = str(sum(v == "environment" for v in _cls.values()))
 N["niOther"] = str(sum(v == "other" for v in _cls.values()))
@@ -115,7 +125,20 @@ usd = {c: 1000 * sum(r["usd"] for r in sel(c)) / max(1, len(sel(c))) for c in CF
 N["cheapCfg"] = "\\E{" + min(usd, key=usd.get) + "}"
 N["usdNT"], N["usdPrompt"] = f"{usd['E3N']:.2f}", f"{usd['E0']:.2f}"
 calls = {c: sum(r["n_llm"] for r in sel(c)) / max(1, len(sel(c))) for c in CFGS}
-N["callsRatioNT"] = f"{calls['E3N'] / calls['E0']:.1f}"
+N["callsRatioNT"] = f"{round(calls['E3N'], 1) / round(calls['E0'], 1):.1f}"  # from the values Table IV prints
+# X6 (suite_x6.py): session auditor vs. a static own-group rule (E7S); main grid, three repetitions
+_x = [r for r in XALL + [r for r in ALL if r["cfg"] in ("E3T", "E7", "E8") and r["cat"] == "A3"]
+      if r["model"] in BAL_MODELS and r["rep"] in (0, 1, 2) and r["dom"] in ("tpch", "tpcds", "bird")]
+_xs = lambda c, cat: [r for r in _x if r["cfg"] == c and r["cat"] == cat]  # noqa: E731
+N["nXsix"] = f"{sum(1 for r in XALL if r['model'] in BAL_MODELS):,}".replace(",", "{,}")
+for _c, _n in (("E3T", "Truman"), ("E7", "Audit"), ("E7S", "Static"), ("E8", "Cov")):
+    N["xConeDet" + _n] = pc(_xs(_c, "C1"), "secrecy")
+    N["xConeLeak" + _n] = pc(_xs(_c, "C1"), "leak")
+    N["xCtwoAcc" + _n] = pc(_xs(_c, "C2"), "correct")
+N["xAthreeDetStatic"] = pc(_xs("E7S", "A3"), "secrecy")
+N["xBthreeAccStatic"] = pc([r for r in _x if r["cfg"] == "E7S" and r["cat"] == "B3"], "correct")
+N["toolCallsMean"] = f"{sum(r['n_calls'] for r in rows) / len(rows):.1f}"
+N["aThreeMulti"] = f"{100 * sum(r['n_calls'] >= 2 for r in rows if a3(r)) / max(1, sum(1 for r in rows if a3(r))):.0f}"
 N["callsVer"], N["callsGuard"] = f"{calls['E2']:.1f}", f"{calls['E6']:.1f}"
 N["leakAoneTwoDet"] = pc(sel(DET, a12), "leak")
 N["leakAoneTwoPrompt"], N["leakAoneTwoVerifier"], N["leakAoneTwoGuard"] = (pc(sel(c, a12), "leak") for c in ("E0", "E2", "E6"))
@@ -147,6 +170,12 @@ for _m, _p in (("glm-5.3", "glm"), ("gpt-6-sol", "gpt"), ("claude-opus-5.5", "cl
     N[_p + "EthreeNFr"] = pc(_gs("E3N", ben), "refused")
     N[_p + "ShareLeak"] = pc(_gs("E0", lambda r: a3(r) and r["qid"].endswith("-1")), "leak")
 N["leakPromptMin"], N["leakPromptMax"] = f"{min(lpm):.0f}", f"{max(lpm):.0f}"
+# models whose prompt-only agents leak more often on the share variant of differencing questions than on the explicit one
+_asym = [m for m in sorted({r["model"] for r in ALL})
+         if (lambda s, e: s and e is not None and float(s) > float(e))(
+             pc([r for r in ALL if r["model"] == m and r["cfg"] == "E0" and a3(r) and r["qid"].endswith("-1")], "leak"),
+             pc([r for r in ALL if r["model"] == m and r["cfg"] == "E0" and a3(r) and r["qid"].endswith("-0")], "leak"))]
+N["nShareAsymWord"] = _WORDS.get(len(_asym), str(len(_asym)))
 N["mcSecDet"] = mcnemar("E3T", "E7", "secrecy", a3)
 N["mcAccAudit"] = mcnemar("E3T", "E7", "correct", ben)
 N["mcMix"] = mcnemar("E4M", "E0", "leak", att)
@@ -178,6 +207,17 @@ N["existNT"] = f"{100 * mech['tpch|existence-accuracy|E3N'][0]:.0f}"
 N["existBase"] = f"{100 * mech['tpch|existence-accuracy|E3N'][1]:.0f}"
 ov = json.load(open(os.path.join(HERE, "pilot", "overhead.json")))
 N["nReplay"] = str(ov["E0"]["n"])
+nat = json.load(open(os.path.join(HERE, "pilot", "native_rls.json")))  # E5 = PostgreSQL row-level security
+N["nativeOk"] = f"{nat['overhead']['executed_both']:,}".replace(",", "{,}")
+N["nativeQ"] = f"{nat['overhead']['queries']:,}".replace(",", "{,}")
+N["nativeRatio"] = f"{nat['overhead']['median_ratio_rls_vs_owner']:.2f}"
+_sc = json.load(open(os.path.join(HERE, "pilot", "overhead_scale.json")))  # TPC-H SF 0.05 / 1 / 5 replay
+_sfs = sorted((k for k in _sc if k.startswith("sf")), key=lambda k: float(k[2:]))
+N["scLo"], N["scHi"] = _sfs[0][2:], _sfs[-1][2:]
+N["nScale"] = str(_sc["queries"])
+for _c, _n in (("E0", "Raw"), ("E3T", "Rew"), ("E5", "View"), ("E3N", "NT")):
+    N["sc" + _n + "Lo"] = f"{_sc[_sfs[0]][_c]['median_ms']:.1f}"
+    N["sc" + _n + "Hi"] = f"{_sc[_sfs[-1]][_c]['median_ms']:.1f}"
 N["ovRaw"], N["ovView"], N["ovRewrite"], N["ovNT"] = (f"{ov[c]['median_ms']:.1f}" for c in ("E0", "E5", "E3T", "E3N"))
 N["artifacturl"] = "\\url{https://github.com/wanghongsheng01/Agent-RLS-EAB}"
 N["totalUSD"] = f"{sum(json.loads(l)['usd'] for l in open(os.path.join(HERE, 'cache', 'usage.log'))):.0f}"
@@ -249,7 +289,7 @@ def own_scope(d, p):
 
 den_own = den_other = 0
 for k, ss in S.items():
-    if k[1] not in ("E7", "E8") or k[2] not in BAL_MODELS:
+    if k[1] not in ("E7", "E8") or k[2] not in BAL_MODELS or SUITE[k[0]]["cat"].startswith("C"):
         continue
     d = doms[k[0].split("-")[0]]
     p = k[0].split("-")[1]
@@ -305,9 +345,9 @@ for c in ("E0", "E3T", "E7", "E8"):
     N["lenMis" + c] = f"{100 * sum(lenient_mis(r) for r in R) / max(1, len(R)):.0f}"
 
 # ---------------------------------------------------------------- prompt ablations (same mechanism, different prompt)
-ABL = [r for r in ALL if r["cfg"] in ("E3TP", "E3NP", "E4MH")]
+ABL = [r for r in ALL if r["cfg"] in ("E3TP", "E3NP", "E4MH", "E4MT")]
 abl_models = sorted({r["model"] for r in ABL})
-base_of = {"E3TP": "E3T", "E3NP": "E3N", "E4MH": "E4M"}
+base_of = {"E3TP": "E3T", "E3NP": "E3N", "E4MH": "E4M", "E4MT": "E4M"}
 
 
 def abl_sel(cfg, pred):
@@ -316,17 +356,26 @@ def abl_sel(cfg, pred):
 
 ABLT = ["\\begin{table}[t]", "\\centering",
         "\\caption{Prompt ablations (" + ", ".join(dict(MODELS)[m] for m in abl_models) + ", one repetition; \\%). \\E{E3T}/\\E{E3N}+P state the "
-        "user's scope in the prompt; \\E{E4M}+H tells the agent that raw SQL is unfiltered and states the policy.}",
+        "user's scope in the prompt; \\E{E4M}+T tells the agent that raw SQL is unfiltered, and \\E{E4M}+H also states the policy.}",
         "\\label{tab:ablate}", "\\scriptsize", "\\setlength{\\tabcolsep}{2.5pt}", "\\begin{tabular}{lcccccc}", "\\toprule",
         "Config. & Benign acc. & False ref. & B2 mislead & Attack leak & Inf. (A3) & LLM calls\\\\", "\\midrule"]
-for a in ("E0", "E3T", "E3TP", "E3N", "E3NP", "E4M", "E4MH"):
-    lab = {"E3TP": "\\E{E3T}+P", "E3NP": "\\E{E3N}+P", "E4MH": "\\E{E4M}+H"}.get(a, f"\\E{{{a}}}")
+for a in ("E0", "E3T", "E3TP", "E3N", "E3NP", "E4M", "E4MT", "E4MH"):
+    lab = {"E3TP": "\\E{E3T}+P", "E3NP": "\\E{E3N}+P", "E4MH": "\\E{E4M}+H", "E4MT": "\\E{E4M}+T"}.get(a, f"\\E{{{a}}}")
     R = abl_sel(a, lambda r: True)
     ABLT.append(f"{lab} & {cell(abl_sel(a, ben), 'correct')} & {cell(abl_sel(a, ben), 'refused')} & "
                 f"{cell(abl_sel(a, b2), 'misleading')} & {cell(abl_sel(a, att), 'leak')} & {cell(abl_sel(a, a3), 'secrecy')} & "
                 f"{sum(r['n_llm'] for r in R) / max(1, len(R)):.1f}\\\\")
 ABLT += ["\\bottomrule", "\\end{tabular}", "\\end{table}"]
 open(os.path.join(OUT, "tab_ablate.tex"), "w").write("\n".join(ABLT) + "\n")
+N["abEfourMTLeak"] = cell(abl_sel("E4MT", att), "leak")
+N["abEfourMTAcc"] = cell(abl_sel("E4MT", ben), "correct")
+
+# reworded coverage note (E8P), main grid: same models and repetitions as E8
+_e8p = [r for r in ALL if r["cfg"] == "E8P" and r["model"] in BAL_MODELS and r["rep"] in (0, 1, 2)]
+N["nEeightP"] = f"{len(_e8p):,}".replace(",", "{,}")
+N["misCovP"] = pc([r for r in _e8p if b2(r)], "misleading")
+N["accCovP"] = pc([r for r in _e8p if ben(r)], "correct")
+N["leakCovP"] = pc([r for r in _e8p if att(r)], "leak")
 for a in ("E0", "E3TP", "E3NP", "E4MH", "E3T", "E3N", "E4M"):
     N["ab" + a + "Mis"] = cell(abl_sel(a, b2), "misleading")
     N["ab" + a + "Leak"] = cell(abl_sel(a, att), "leak")
@@ -379,9 +428,19 @@ L += ["\\bottomrule", "\\end{tabular}", "\\end{table*}"]
 open(os.path.join(OUT, "tab_dom.tex"), "w").write("\n".join(L) + "\n")
 
 MODELS = [(m, n) for m, n in MODELS if any(r["model"] == m for r in ALL)]
+_reps = {m: (len({r["rep"] for r in ALL if r["model"] == m and r["cat"] == "B1"}),
+             len({r["rep"] for r in ALL if r["model"] == m and r["cat"] != "B1"})) for m, _ in MODELS}
+_nm = dict(MODELS)
+_all3 = [_nm[m] for m, (b, o) in _reps.items() if b == 3]
+_part = [_nm[m] for m, (b, o) in _reps.items() if b == 1 and o == 3]
+_one = [_nm[m] for m, (b, o) in _reps.items() if b == 1 and o == 1]
+_and = lambda xs: ", ".join(xs[:-1]) + (", and " if len(xs) > 2 else " and ") + xs[-1] if len(xs) > 1 else "".join(xs)  # noqa: E731
+REPS_NOTE = (_and(_all3) + " run three repetitions" + ("; " + _and(_part) + " run three on all but the in-scope questions (B1), "
+             "which run once" if _part else "") + ("; " + _and(_one) + (" runs" if len(_one) == 1 else " run") + " one" if _one else "") + ".")
 L = ["\\begin{table*}[t]", "\\centering",
-     "\\caption{Per-model results (\\%): benign accuracy / attack answer leakage / Truman-misleading rate on B2. DS-flash, "
-     "GLM-air, and Kimi run three repetitions; the other models run one.}",
+     "\\caption{Per-model results (\\%): benign accuracy / attack answer leakage / Truman-misleading rate on B2; bottom rows: "
+     "inference leakage on differencing questions (A3) under \\E{E3T}, and answer leakage on their share and explicit variants "
+     "under \\E{E0}. " + REPS_NOTE + "}",
      "\\label{tab:model}", "\\footnotesize", "\\setlength{\\tabcolsep}{5pt}",
      "\\begin{tabular}{l" + "c" * len(MODELS) + "}", "\\toprule", " & " + " & ".join(n for _, n in MODELS) + "\\\\", "\\midrule"]
 rows_bal = rows
@@ -390,6 +449,12 @@ for c in CFGS:
     L.append(f"\\E{{{c}}} & " + " & ".join(
         f"{cell(sel(c, ben, model=m), 'correct')}/{cell(sel(c, att, model=m), 'leak')}/{cell(sel(c, b2, model=m), 'misleading')}"
         for m, _ in MODELS) + "\\\\")
+L.append("\\midrule")
+L.append("Inf.\\ A3, \\E{E3T} & " + " & ".join(cell(sel("E3T", a3, model=m), "secrecy") for m, _ in MODELS) + "\\\\")
+L.append("Share, \\E{E0} & " + " & ".join(cell(sel("E0", lambda r: a3(r) and r["qid"].endswith("-1"), model=m), "leak")
+                                           for m, _ in MODELS) + "\\\\")
+L.append("Explicit, \\E{E0} & " + " & ".join(cell(sel("E0", lambda r: a3(r) and r["qid"].endswith("-0"), model=m), "leak")
+                                              for m, _ in MODELS) + "\\\\")
 L += ["\\bottomrule", "\\end{tabular}", "\\end{table*}"]
 open(os.path.join(OUT, "tab_model.tex"), "w").write("\n".join(L) + "\n")
 rows = rows_bal
@@ -412,18 +477,35 @@ L = ["\\begin{table}[t]", "\\centering",
      "domain) and median per-query latency of " + N["nReplay"] + " replayed agent queries.}",
      "\\label{tab:mech}", "\\scriptsize", "\\setlength{\\tabcolsep}{3pt}", "\\begin{tabular}{lcccc}", "\\toprule",
      "Probe & \\E{E0} & \\E{E3T} & \\E{E3N} & \\E{E5}$^*$\\\\", "\\midrule"]
-for k, name in probes:
-    L.append(name + " & " + " & ".join("\\checkmark" if any(mech[f"{d}|{k}|{c}"]["ni_leak"] for d in ("tpch", "ent")) else "--"
+
+
+def leak(d, k, c):
+    return nat[d]["probes"][k]["ni_leak"] if c == "E5" else mech[f"{d}|{k}|{c}"]["ni_leak"]
+
+
+for k, name in probes + [("information_schema", "Catalog statistics")]:
+    L.append(name + " & " + " & ".join("\\checkmark" if any(leak(d, k, c) for d in ("tpch", "ent")) else "--"
                                        for c in ("E0", "E3T", "E3N", "E5")) + "\\\\")
 ex = mech
-L.append("Existence inferred (TPC-H, acc.\\ \\%; base rate " + f"{100 * ex['tpch|existence-accuracy|E3N'][1]:.0f}" + ") & " + " & ".join(f"{100 * ex[f'tpch|existence-accuracy|{c}'][0]:.0f}" for c in ("E0", "E3T", "E3N", "E5")) + "\\\\")
-L.append("Exact value recovered & " + " & ".join("yes" if abs(ex[f"tpch|binsearch|{c}"][0] - ex[f"tpch|binsearch|{c}"][1]) < 0.02
-                                                 and abs(ex[f"ent|binsearch|{c}"][0] - ex[f"ent|binsearch|{c}"][1]) < 0.02 else "no"
-                                                 for c in ("E0", "E3T", "E3N", "E5")) + "\\\\")
+def inferred(c):  # existence is inferred iff the best single-response classifier beats the base rate
+    acc, base = (nat["tpch"]["existence"] if c == "E5" else ex[f"tpch|existence-accuracy|{c}"][:2])
+    return acc > base
+
+
+L.append("Existence of forbidden facts inferred & " + " & ".join("yes" if inferred(c) else "no" for c in ("E0", "E3T", "E3N", "E5")) + "\\\\")
+def recovered(c):
+    if c == "E5":
+        return all(abs(ex[f"{d}|binsearch|E0"][0] - nat[d]["binsearch"][0]) < 0.02 for d in ("tpch", "ent"))
+    return all(abs(ex[f"{d}|binsearch|{c}"][0] - ex[f"{d}|binsearch|{c}"][1]) < 0.02 for d in ("tpch", "ent"))
+
+
+L.append("Exact value recovered & " + " & ".join("yes" if recovered(c) else "no" for c in ("E0", "E3T", "E3N", "E5")) + "\\\\")
 L.append("\\midrule")
 L.append("Median latency (ms) & " + " & ".join(f"{ov[c]['median_ms']:.1f}" for c in ("E0", "E3T", "E3N", "E5")) + "\\\\")
 L.append("P95 latency (ms) & " + " & ".join(f"{ov[c]['p95_ms']:.1f}" for c in ("E0", "E3T", "E3N", "E5")) + "\\\\")
 L += ["\\bottomrule", "\\end{tabular}", "\\smallskip", "",
-      "\\raggedright $^*$Secure views emulated in an engine without GRANT; qualified names bypass them.", "\\end{table}"]
+      "\\raggedright $^*$Probes on PostgreSQL~16 row-level security with column grants; latencies with secure views in "
+      "DuckDB, the engine of the other columns (native RLS: median " + f"{nat['overhead']['median_ratio_rls_vs_owner']:.2f}" +
+      "$\\times$ the table owner's latency).", "\\end{table}"]
 open(os.path.join(OUT, "tab_mech.tex"), "w").write("\n".join(L) + "\n")
 print(json.dumps(N, indent=0)[:3000])
