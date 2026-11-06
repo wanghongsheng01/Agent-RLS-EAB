@@ -1,0 +1,5 @@
+duckdb==1.4.5
+sqlglot==30.29.0
+numpy
+requests
+matplotlib
