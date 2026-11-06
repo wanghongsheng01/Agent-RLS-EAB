@@ -1,6 +1,6 @@
 """Enforcement-mechanism overhead, isolated from the LLM: replay every distinct SQL query the agents issued under E3T
-through raw execution (no enforcement), E3T (gateway rewrite), E5 (in-database secure views) and E3N (non-Truman
-double execution); 5 timed runs each after one warm-up, single-threaded DuckDB."""
+through raw execution (no enforcement), E3T (gateway rewrite), E5 (in-database secure views), E3N (non-Truman
+double execution) and E3D (static non-Truman check plus rewrite); 5 timed runs each after one warm-up, single-threaded DuckDB."""
 import json, os, statistics, time
 from domains import DOMAINS
 from enforce import Executor
@@ -17,7 +17,7 @@ for s in iter_sessions(os.path.join(HERE, "pilot", "sessions.jsonl")):
         if c["name"] == "run_sql" and c["args"].get("sql"):
             qs[(dom, p, c["args"]["sql"])] = 1
 print(len(qs), "distinct queries")
-res = {c: [] for c in ("E0", "E3T", "E5", "E3N")}
+res = {c: [] for c in ("E0", "E3T", "E5", "E3N", "E3D")}
 for (dom, p, sql) in qs:
     row = {}
     for cfg in res:
@@ -36,7 +36,7 @@ for cfg, v in res.items():
     out[cfg] = {"n": len(v), "median_ms": round(statistics.median(v), 2), "p95_ms": round(v[int(0.95 * len(v)) - 1], 2),
                 "mean_ms": round(sum(v) / len(v), 2)}
 base = res["E0"]
-for cfg in ("E3T", "E5", "E3N"):
+for cfg in ("E3T", "E5", "E3N", "E3D"):
     ratios = sorted(a / b for a, b in zip(res[cfg], base) if b > 0)
     out[cfg]["median_ratio_vs_raw"] = round(statistics.median(ratios), 2)
     out[cfg]["p95_ratio_vs_raw"] = round(ratios[int(0.95 * len(ratios)) - 1], 2)

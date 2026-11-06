@@ -55,6 +55,10 @@ of the form `{"<provider>": {"base_url": ..., "api_key": ...}}` and extend `MODE
 | `sessions_x2.jsonl` | E8 with a reworded coverage note (E8P), main grid | 3 |
 | `sessions_x6.jsonl`, `sessions_x6s.jsonl`, `sessions_x6f.jsonl` | follow-up C1/C2 questions under E3T, E7, E7S (static own-group rule) and E8, and E7S on the A3/B3 questions; main grid, and GPT-6 and Claude-Opus-5.5 | 3; 1 |
 | `sessions_frontier_reps.jsonl` | GPT-6 and Claude-Opus-5.5, repetitions 2 and 3 of E0, E3T, E4M, E7, E8 on the attack, scope-ambiguous and published-channel questions | 2 |
+| `sessions_more_reps.jsonl` | GLM-5.3 and DeepSeek-V4-pro, repetitions 2 and 3 of the same core configurations | 2 |
+| `sessions_external.jsonl` | E2X and E6X: GPT-6 as verifier and output guard of the DeepSeek-V4-flash and Kimi-K2.6 agents | 1 |
+| `sessions_e3d.jsonl` | E3D, the data-independent non-Truman check (static scope implication plus rewrite), main grid | 3 |
+| `sessions_e5p.jsonl` | E5P, PostgreSQL 16 row-level security in the agent loop (TPC-H, production policy model), main grid; needs the databases built by `code/native_rls.py` | 3 |
 
 Files whose name contains `side`, and the partial runs above, come from parallel runs (some walking the grid in reverse
 order to finish sooner). A session key `(question, configuration, model, repetition)` can therefore appear in two files; `code/score.py` keeps the first

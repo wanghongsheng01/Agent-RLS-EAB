@@ -82,7 +82,8 @@ def main(k):
         key, s = ks
         dom, p = s["qid"].split("-")[:2]
         calls = [{"name": c["name"], "args": c["args"]} for c in s["calls"]]
-        ver = make_verifier(doms[dom], p, s["model"], s["rep"]) if s["cfg"] == "E2" else None
+        ver = (make_verifier(doms[dom], p, agent.EXTERNAL if s["cfg"] == "E2X" else s["model"], s["rep"])
+           if s["cfg"] in ("E2", "E2X") else None)
         return key, any(noninterference(doms[dom], p, "E3T" if s["cfg"] == "E5" else s["cfg"], calls, verifier=ver))
 
     n = 0

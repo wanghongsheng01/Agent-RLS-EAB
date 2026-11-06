@@ -137,6 +137,35 @@ for _c, _n in (("E3T", "Truman"), ("E7", "Audit"), ("E7S", "Static"), ("E8", "Co
     N["xCtwoAcc" + _n] = pc(_xs(_c, "C2"), "correct")
 N["xAthreeDetStatic"] = pc(_xs("E7S", "A3"), "secrecy")
 N["xBthreeAccStatic"] = pc([r for r in _x if r["cfg"] == "E7S" and r["cat"] == "B3"], "correct")
+# round 3: external verifier/guard (E2X, E6X), data-independent non-Truman check (E3D), database RLS in the loop (E5P)
+def _grp(cfg, models, reps, doms=None):
+    return [r for r in ALL if r["cfg"] == cfg and r["model"] in models and r["rep"] in reps and (doms is None or r["dom"] in doms)]
+
+
+_AB = ("ds-flash", "kimi-k2.6")
+for _c, _n in (("E2", "Two"), ("E2X", "TwoX"), ("E6", "Six"), ("E6X", "SixX")):
+    _R = _grp(_c, _AB, (0,))
+    N["ext" + _n + "Leak"] = pc([r for r in _R if att(r)], "leak")
+    N["ext" + _n + "Ni"] = pc(_R, "ni")
+    N["ext" + _n + "Fr"] = pc([r for r in _R if ben(r)], "refused")
+    N["ext" + _n + "Acc"] = pc([r for r in _R if ben(r)], "correct")
+for _c, _n in (("E3N", "NT"), ("E3D", "D")):
+    _R = _grp(_c, BAL_MODELS, (0, 1, 2))
+    N["sd" + _n + "Acc"] = pc([r for r in _R if ben(r)], "correct")
+    N["sd" + _n + "Fr"] = pc([r for r in _R if ben(r)], "refused")
+    N["sd" + _n + "Mis"] = pc([r for r in _R if b2(r)], "misleading")
+    N["sd" + _n + "Leak"] = pc([r for r in _R if att(r)], "leak")
+    N["sd" + _n + "Ni"] = pc(_R, "ni")
+    N["sd" + _n + "Calls"] = f"{sum(r['n_llm'] for r in _R) / max(1, len(_R)):.1f}"
+for _c, _n in (("E3T", "T"), ("E5P", "P")):
+    _R = _grp(_c, BAL_MODELS, (0, 1, 2), ("tpch", "ent"))
+    N["db" + _n + "Acc"] = pc([r for r in _R if ben(r)], "correct")
+    N["db" + _n + "Leak"] = pc([r for r in _R if att(r)], "leak")
+    N["db" + _n + "Ni"] = pc(_R, "ni")
+    N["db" + _n + "Mis"] = pc([r for r in _R if b2(r)], "misleading")
+    N["db" + _n + "Inf"] = pc([r for r in _R if a3(r)], "secrecy")
+N["nEfiveP"] = str(len(_grp("E5P", BAL_MODELS, (0, 1, 2), ("tpch", "ent"))))
+N["nRoundThree"] = f"{sum(1 for r in ALL if r['cfg'] in ('E2X', 'E6X', 'E3D', 'E5P')):,}".replace(",", "{,}")
 N["toolCallsMean"] = f"{sum(r['n_calls'] for r in rows) / len(rows):.1f}"
 N["aThreeMulti"] = f"{100 * sum(r['n_calls'] >= 2 for r in rows if a3(r)) / max(1, sum(1 for r in rows if a3(r))):.0f}"
 N["callsVer"], N["callsGuard"] = f"{calls['E2']:.1f}", f"{calls['E6']:.1f}"
@@ -219,6 +248,7 @@ for _c, _n in (("E0", "Raw"), ("E3T", "Rew"), ("E5", "View"), ("E3N", "NT")):
     N["sc" + _n + "Lo"] = f"{_sc[_sfs[0]][_c]['median_ms']:.1f}"
     N["sc" + _n + "Hi"] = f"{_sc[_sfs[-1]][_c]['median_ms']:.1f}"
 N["ovRaw"], N["ovView"], N["ovRewrite"], N["ovNT"] = (f"{ov[c]['median_ms']:.1f}" for c in ("E0", "E5", "E3T", "E3N"))
+N["ovSD"] = f"{ov['E3D']['median_ms']:.1f}" if "E3D" in ov else "--"
 N["artifacturl"] = "\\url{https://github.com/wanghongsheng01/Agent-RLS-EAB}"
 N["totalUSD"] = f"{sum(json.loads(l)['usd'] for l in open(os.path.join(HERE, 'cache', 'usage.log'))):.0f}"
 
@@ -276,6 +306,33 @@ b = boot("E3T", "E8", "misleading", b2); N["bootMisCov"], N["nTmplBtwo"] = ci(b)
 N["bootMisTruman"] = ci(boot("E3T", None, "misleading", b2))
 N["bootAccNT"] = ci(boot("E3T", "E3N", "correct", ben))
 N["bootAccAudit"] = ci(boot("E3T", "E7", "correct", ben))
+
+
+def perm(cfg_a, cfg_b, key, pred, B=20000, seed=11):
+    """Two-sided template-level sign-flip permutation p-value for rate(cfg_a) - rate(cfg_b): per template the mean
+    paired difference; under the null each template's difference is symmetric around 0."""
+    by = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        if pred(r) and r["cfg"] in (cfg_a, cfg_b):
+            by[tmpl(r["qid"])][r["cfg"]].append(bool(r.get(key)))
+    d = [100.0 * (sum(v[cfg_a]) / len(v[cfg_a]) - sum(v[cfg_b]) / len(v[cfg_b])) for v in by.values() if v[cfg_a] and v[cfg_b]]
+    obs = abs(sum(d))
+    rnd = random.Random(seed)
+    hit = sum(abs(sum(x if rnd.random() < 0.5 else -x for x in d)) >= obs - 1e-9 for _ in range(B))
+    return (hit + 1) / (B + 1)
+
+
+def pfmt(p):
+    return "<10^{-4}" if p < 1e-4 else (f"{p:.4f}".rstrip("0") if p < 0.01 else f"{p:.2f}")
+
+
+_perms = {"permMix": perm("E4M", "E0", "leak", att), "permAccNT": perm("E3T", "E3N", "correct", ben),
+          "permMisCov": perm("E3T", "E8", "misleading", b2), "permAccAudit": perm("E3T", "E7", "correct", ben),
+          "permMisTrumanPrompt": perm("E3T", "E0", "misleading", b2)}
+for _k, _v in _perms.items():
+    N[_k] = pfmt(_v)
+N["permMixRel"] = ("<10^{-4}" if _perms["permMix"] < 1e-4 else "=" + pfmt(_perms["permMix"]))  # relation included
+N["permMaxKey"] = pfmt(max(v for k, v in _perms.items() if k != "permAccAudit"))
 N["bootShare"] = ci(boot("E0", None, "leak", lambda r: r["cat"] == "A3" and r["qid"].endswith("-1")))
 N["nTemplates"] = str(len({tmpl(r["qid"]) for r in rows}))
 
@@ -475,8 +532,8 @@ probes = [("direct", "Direct out-of-scope read"), ("hidden column", "Hidden colu
 L = ["\\begin{table}[t]", "\\centering",
      "\\caption{LLM-free probes on TPC-H and the production policy model (\\checkmark{} = noninterference violated on either "
      "domain) and median per-query latency of " + N["nReplay"] + " replayed agent queries.}",
-     "\\label{tab:mech}", "\\scriptsize", "\\setlength{\\tabcolsep}{3pt}", "\\begin{tabular}{lcccc}", "\\toprule",
-     "Probe & \\E{E0} & \\E{E3T} & \\E{E3N} & \\E{E5}$^*$\\\\", "\\midrule"]
+     "\\label{tab:mech}", "\\scriptsize", "\\setlength{\\tabcolsep}{3pt}", "\\begin{tabular}{lccccc}", "\\toprule",
+     "Probe & \\E{E0} & \\E{E3T} & \\E{E3N} & \\E{E3D} & \\E{E5}$^*$\\\\", "\\midrule"]
 
 
 def leak(d, k, c):
@@ -485,24 +542,24 @@ def leak(d, k, c):
 
 for k, name in probes + [("information_schema", "Catalog statistics")]:
     L.append(name + " & " + " & ".join("\\checkmark" if any(leak(d, k, c) for d in ("tpch", "ent")) else "--"
-                                       for c in ("E0", "E3T", "E3N", "E5")) + "\\\\")
+                                       for c in ("E0", "E3T", "E3N", "E3D", "E5")) + "\\\\")
 ex = mech
 def inferred(c):  # existence is inferred iff the best single-response classifier beats the base rate
     acc, base = (nat["tpch"]["existence"] if c == "E5" else ex[f"tpch|existence-accuracy|{c}"][:2])
     return acc > base
 
 
-L.append("Existence of forbidden facts inferred & " + " & ".join("yes" if inferred(c) else "no" for c in ("E0", "E3T", "E3N", "E5")) + "\\\\")
+L.append("Existence of forbidden facts inferred & " + " & ".join("yes" if inferred(c) else "no" for c in ("E0", "E3T", "E3N", "E3D", "E5")) + "\\\\")
 def recovered(c):
     if c == "E5":
         return all(abs(ex[f"{d}|binsearch|E0"][0] - nat[d]["binsearch"][0]) < 0.02 for d in ("tpch", "ent"))
     return all(abs(ex[f"{d}|binsearch|{c}"][0] - ex[f"{d}|binsearch|{c}"][1]) < 0.02 for d in ("tpch", "ent"))
 
 
-L.append("Exact value recovered & " + " & ".join("yes" if recovered(c) else "no" for c in ("E0", "E3T", "E3N", "E5")) + "\\\\")
+L.append("Exact value recovered & " + " & ".join("yes" if recovered(c) else "no" for c in ("E0", "E3T", "E3N", "E3D", "E5")) + "\\\\")
 L.append("\\midrule")
-L.append("Median latency (ms) & " + " & ".join(f"{ov[c]['median_ms']:.1f}" for c in ("E0", "E3T", "E3N", "E5")) + "\\\\")
-L.append("P95 latency (ms) & " + " & ".join(f"{ov[c]['p95_ms']:.1f}" for c in ("E0", "E3T", "E3N", "E5")) + "\\\\")
+L.append("Median latency (ms) & " + " & ".join(f"{ov[c]['median_ms']:.1f}" for c in ("E0", "E3T", "E3N", "E3D", "E5")) + "\\\\")
+L.append("P95 latency (ms) & " + " & ".join(f"{ov[c]['p95_ms']:.1f}" for c in ("E0", "E3T", "E3N", "E3D", "E5")) + "\\\\")
 L += ["\\bottomrule", "\\end{tabular}", "\\smallskip", "",
       "\\raggedright $^*$Probes on PostgreSQL~16 row-level security with column grants; latencies with secure views in "
       "DuckDB, the engine of the other columns (native RLS: median " + f"{nat['overhead']['median_ratio_rls_vs_owner']:.2f}" +

@@ -24,7 +24,7 @@ from domains import DOMAINS, inlist, PILOT
 MAX_ROWS, MAX_CHARS, TIMEOUT = 50, 4000, 20
 CONFIGS = ["E0", "E2", "E6", "E3T", "E3N", "E4", "E4M", "E7", "E8"]
 # ablations: same mechanisms, different system prompt (scope stated / honest description of the raw SQL tool)
-ABLATION_BASE = {"E3TP": "E3T", "E3NP": "E3N", "E4MH": "E4M", "E4MT": "E4M", "E8P": "E8", "E7S": "E3T"}
+ABLATION_BASE = {"E3TP": "E3T", "E3NP": "E3N", "E4MH": "E4M", "E4MT": "E4M", "E8P": "E8", "E7S": "E3T", "E2X": "E2", "E6X": "E6", "E3D": "E3N", "E5P": "E3T"}
 _local = threading.local()
 
 
@@ -103,6 +103,8 @@ class Executor:
             t.append(RAW_SQL_SPEC)
         if self.cfg in ("E4", "E4M"):
             t += self.sem_specs()
+        if self.variant == "E5P":
+            t = [json.loads(json.dumps(x).replace("DuckDB dialect", "PostgreSQL dialect")) for x in t]
         return t
 
     def sem_specs(self):
@@ -135,6 +137,8 @@ class Executor:
         try:
             if name == "company_kpi":
                 out = self.kpi(args, meta)
+            elif name == "run_sql" and self.variant == "E5P":
+                out = self.native(args.get("sql", ""), meta)
             elif name == "run_sql" and self.cfg in ("E0", "E6", "E4M"):
                 out = self.raw(args.get("sql", ""), meta)
             elif name == "run_sql" and self.cfg == "E2":
@@ -143,6 +147,8 @@ class Executor:
                 out = self.truman(args.get("sql", ""), meta)
             elif name == "run_sql" and self.cfg == "E5":
                 out = self.views(args.get("sql", ""), meta)
+            elif name == "run_sql" and self.variant == "E3D":
+                out = self.static_nontruman(args.get("sql", ""), meta)
             elif name == "run_sql" and self.cfg == "E3N":
                 out = self.nontruman(args.get("sql", ""), meta)
             elif name == "query_metric" and self.cfg in ("E4", "E4M"):
@@ -221,6 +227,63 @@ class Executor:
         cols, rows = run(conn_e5(path, self.d.pert), sql, "m" if self.base == "main" else "x")
         meta["exec_ms"] += (time.perf_counter() - t) * 1000
         return fmt(cols, rows)
+
+    # ---------------------------------------------------------------- E5P native row-level security (PostgreSQL)
+    def native(self, sql, meta):
+        """Run the agent's statement as the principal's role on PostgreSQL 16 with row policies and column grants
+        (databases built by native_rls.py); DuckDB-dialect statements that fail are retried after translation."""
+        import psycopg
+        db = f"{self.d.name}_orig" if self.base == "main" else f"{self.d.name}_pert_{self.p}"
+        cons = getattr(_local, "pg", None)
+        if cons is None:
+            cons = _local.pg = {}
+        key = (db, self.p)  # one connection per database and principal: the role is set once per connection
+        if key not in cons:
+            c = psycopg.connect(pg_uri().replace("/postgres?", f"/{db}?"), autocommit=True)
+            c.execute("SET search_path TO main; SET statement_timeout = '20s'")
+            c.execute(f"SET ROLE r_{self.d.name}_{self.p}")
+            cons[key] = c
+        c = cons[key]
+        meta["sql"] = sql
+        t = time.perf_counter()
+        err = None
+        for q in (sql, None):
+            if q is None:
+                try:
+                    q = sqlglot.transpile(sql, read="duckdb", write="postgres")[0]
+                except Exception:
+                    break
+            try:
+                cur = c.execute(q)
+                cols = [x.name for x in cur.description] if cur.description else []
+                rows = [[float(v) if type(v).__name__ == "Decimal" else (v if v is None or isinstance(v, (int, float, str)) else str(v))
+                         for v in r] for r in cur.fetchall()]
+                meta["exec_ms"] += (time.perf_counter() - t) * 1000
+                return fmt(cols, rows)
+            except Exception as e:
+                err = err or (type(e).__name__ + ": " + str(e).split("\n")[0])
+        meta["exec_ms"] += (time.perf_counter() - t) * 1000
+        return json.dumps({"error": err[:300] if err else "could not execute"})
+
+    # ---------------------------------------------------------------- E3D data-independent non-Truman
+    def static_nontruman(self, sql, meta):
+        """Accept a statement only if its own filters restrict every row-protected table to the user's scope.
+
+        The decision depends on the statement and the policy only (never on data), so rejections reveal nothing about
+        the instance. Accepted statements still run through the Truman rewrite, which they leave unchanged."""
+        t = time.perf_counter()
+        try:
+            rw = self.rewrite(sql)
+            ok = scope_implied(self.d, self.p, sql)
+        except PermissionError as e:
+            meta["enf_ms"] += (time.perf_counter() - t) * 1000
+            return json.dumps({"error": "PermissionDenied: " + str(e)})
+        meta["enf_ms"] += (time.perf_counter() - t) * 1000
+        if not ok:
+            return json.dumps({"error": "PermissionDenied: every protected table must be restricted to your permission "
+                                        "scope by explicit filters in the same query block"})
+        meta["sql"] = rw
+        return fmt(*self._exec(rw, meta))
 
     # ---------------------------------------------------------------- E3N non-Truman
     def nontruman(self, sql, meta):
@@ -320,6 +383,65 @@ def conn_e5(path, base):
     return d[path]
 
 
+def _scope_alternatives(d, p):
+    """Per row-protected table: alternatives {column: allowed values}; a statement implies the row predicate of a
+    table occurrence if, in the same query block, every column of one alternative is filtered to allowed values."""
+    nums = lambda s: {x.strip() for x in s.strip("()").split(",")}  # noqa: E731
+    if d.name == "tpch":
+        alts = [{"n_name": set(d.P[p]["visible"])}, {"c_nationkey": nums(d.vis_keys(p))}, {"n_nationkey": nums(d.vis_keys(p))}]
+    elif d.name == "tpcds":
+        alts = [{"i_category": set(d.vis(p))}]
+    elif d.name == "bird":
+        alts = [{"a2": set(d.vis(p))}, {"district_id": nums(d.vkeys(p))}]
+    else:
+        v = d.P[p]
+        cust = [{"customer_code": set(d.custs[p])}]
+        dep = {"pa": "D03", "pb": "D05", "pc": "D07"}[p]
+        col = {"pa": None, "pb": "market", "pc": "category"}[p]
+        ads = [{"dept_code": {dep}} | ({col: {g[1] for g in v["grants"]}} if col else {})]
+        return {"ads_sales_m": ads, "dws_export_order": cust, "dim_customer": cust}
+    return {t: alts for t, q in d.filtered(p).items() if " WHERE " in q}
+
+
+def _conjuncts(e):
+    if isinstance(e, exp.And):
+        return _conjuncts(e.left) + _conjuncts(e.right)
+    if isinstance(e, exp.Paren):
+        return _conjuncts(e.this)
+    return [e]
+
+
+def _lit(e):
+    return str(e.this) if isinstance(e, exp.Literal) else None
+
+
+def scope_implied(d, p, sql):
+    alts = _scope_alternatives(d, p)
+    tree = sqlglot.parse_one(sql, read="duckdb")
+    for tab in tree.find_all(exp.Table):
+        if tab.name.lower() not in alts:
+            continue
+        blk = tab.find_ancestor(exp.Select)
+        if blk is None:
+            return False
+        conds = ([blk.args["where"].this] if blk.args.get("where") else []) + \
+                [j.args["on"] for j in blk.args.get("joins") or [] if j.args.get("on")]
+        filt = {}
+        for c in conds:
+            for x in _conjuncts(c):
+                if isinstance(x, exp.EQ) and isinstance(x.left, exp.Column) and _lit(x.right) is not None:
+                    col, vals = x.left.name.lower(), {_lit(x.right)}
+                elif isinstance(x, exp.In) and isinstance(x.this, exp.Column) and x.expressions and \
+                        all(_lit(v) is not None for v in x.expressions):
+                    col, vals = x.this.name.lower(), {_lit(v) for v in x.expressions}
+                else:
+                    continue
+                filt[col] = filt[col] & vals if col in filt else vals
+        if not any(all(c in filt and filt[c] <= allowed for c, allowed in a.items()) for a in alts[tab.name.lower()]):
+            return False
+    return True
+
+
 def build_e5(dom):
     """Per-principal catalog of secure views (schema m over the original instance, x over the perturbed one)."""
     for p in dom.P:
@@ -338,6 +460,19 @@ def build_e5(dom):
                 body = filt.get(t, f"SELECT * FROM {src}.{t}")
                 c.execute(f"CREATE VIEW {sch}.{t} AS {body}")
         c.close()
+
+
+_pg = {}
+
+
+def pg_uri():
+    """Embedded PostgreSQL server holding the native-RLS databases (started on first use)."""
+    with _kpi_lock:
+        if "uri" not in _pg:
+            import pgserver
+            _pg["uri"] = pgserver.get_server(os.environ.get("AGENT_RLS_PGDATA", os.path.join(PILOT, "pgdata")),
+                                             cleanup_mode=None).get_uri()
+    return _pg["uri"]
 
 
 _kpi_cache = {}
