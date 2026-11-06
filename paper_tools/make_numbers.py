@@ -3,7 +3,8 @@ No number in the manuscript is typed by hand."""
 import json, math, os, sys
 from collections import defaultdict
 
-HERE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.makedirs(os.path.join(HERE, "paper_out"), exist_ok=True)
 sys.path.insert(0, os.path.join(HERE, "code"))
 from score import load, SUITE, wilson, iter_sessions  # noqa: E402
 
@@ -250,7 +251,9 @@ for _c, _n in (("E0", "Raw"), ("E3T", "Rew"), ("E5", "View"), ("E3N", "NT")):
 N["ovRaw"], N["ovView"], N["ovRewrite"], N["ovNT"] = (f"{ov[c]['median_ms']:.1f}" for c in ("E0", "E5", "E3T", "E3N"))
 N["ovSD"] = f"{ov['E3D']['median_ms']:.1f}" if "E3D" in ov else "--"
 N["artifacturl"] = "\\url{https://github.com/wanghongsheng01/Agent-RLS-EAB}"
-N["totalUSD"] = f"{sum(json.loads(l)['usd'] for l in open(os.path.join(HERE, 'cache', 'usage.log'))):.0f}"
+_usage = os.path.join(HERE, "cache", "usage.log")  # the package ships the same log as pilot/llm_usage.jsonl
+_usage = _usage if os.path.exists(_usage) else os.path.join(HERE, "pilot", "llm_usage.jsonl")
+N["totalUSD"] = f"{sum(json.loads(l)['usd'] for l in open(_usage)):.0f}"
 
 
 def cell(R, key, ci=False):

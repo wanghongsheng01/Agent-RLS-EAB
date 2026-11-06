@@ -9,7 +9,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-HERE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.makedirs(os.path.join(HERE, "paper_out"), exist_ok=True)
 sys.path.insert(0, os.path.join(HERE, "code"))
 from score import load  # noqa: E402
 
@@ -93,5 +94,5 @@ fam = [Line2D([], [], marker="o", linestyle="none", markersize=4, color=c, label
                     (GREEN, "session auditing (E7, E8)"))]
 fig.legend(handles=fam, loc="upper center", ncol=3, frameon=False, fontsize=6.5, handletextpad=0.2,
            columnspacing=1.6, bbox_to_anchor=(0.5, 1.0))
-fig.savefig(os.path.join(HERE, "paper", "fig_tradeoff.pdf"))
+fig.savefig(os.path.join(HERE, "paper_out", "fig_tradeoff.pdf"))
 print({c: {k: round(v, 1) for k, v in p.items()} for c, p in pts.items()})
