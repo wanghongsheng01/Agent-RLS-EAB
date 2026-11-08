@@ -3,6 +3,7 @@
 import json, re, time
 import llm
 from enforce import Executor, determined
+import appcache
 
 MAX_STEPS = 8
 FINAL = ('When you are done, reply with ONLY a JSON object: {"answer": <number, string or null>, '
@@ -101,11 +102,14 @@ def noninterference(dom, p, cfg, calls, verifier=None):
     return ni
 
 
-def run_session(dom, item, cfg, model, rep=0):
+def run_session(dom, item, cfg, model, rep=0, cache=None):
     p = item["p"]
     checker = EXTERNAL if cfg in ("E2X", "E6X") else model  # E2X/E6X: verifier/guard run by an external model
     ver = make_verifier(dom, p, checker, rep) if cfg in ("E2", "E2X") else None
-    ex = Executor(dom, p, "E3T" if cfg == "E5" else cfg, verifier=ver)
+    if cfg in appcache.CACHE_BASE:  # E9/E9M/E9S: application-layer result cache shared by the deployment
+        ex = appcache.CachedExecutor(Executor(dom, p, appcache.CACHE_BASE[cfg]), cache)
+    else:
+        ex = Executor(dom, p, "E3T" if cfg == "E5" else cfg, verifier=ver)
     tools = ex.tools()
     msgs = [{"role": "system", "content": system_prompt(dom, p, cfg)}, {"role": "user", "content": item["text"]}]
     calls, usage = [], {"pt": 0, "ct": 0, "usd": 0.0, "llm_s": 0.0, "n_llm": 0}
@@ -128,7 +132,7 @@ def run_session(dom, item, cfg, model, rep=0):
             except Exception:
                 args = {}
             out, meta = ex.call(tc["function"]["name"], args)
-            calls.append({"name": tc["function"]["name"], "args": args, "out": out, **meta})
+            calls.append({"name": tc["function"]["name"], "args": args, "out": out, "full_out": out, **meta})
             msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": out})
     ans = parse_final(final)
     guard = None
@@ -144,13 +148,19 @@ def run_session(dom, item, cfg, model, rep=0):
     wall = time.time() - t0
     # noninterference replay: the same tool arguments through the same enforcement point, re-executed on the original
     # and on the perturbed instance (single-threaded, order-insensitive comparison); KPI calls are declassified
-    ni = noninterference(dom, p, "E3T" if cfg == "E5" else cfg, calls, verifier=ver)
+    if cfg in appcache.CACHE_BASE:
+        ni_k = appcache.cache_noninterference(dom, p, cfg, calls)
+        ni = [any(v) for v in zip(*ni_k.values())]
+    else:
+        ni = noninterference(dom, p, "E3T" if cfg == "E5" else cfg, calls, verifier=ver)
     for u in ex.verifier_usage:
         usage["pt"] += u["pt"]; usage["ct"] += u["ct"]; usage["usd"] += u["usd"]; usage["llm_s"] += u["lat"]
         usage["n_llm"] += 1
     secrecy = determined(dom, p, ex.releases)
     return {"qid": item["qid"], "cfg": cfg, "model": model, "rep": rep, "final": ans, "guard": guard,
             "calls": [{k: c[k] for k in ("name", "args", "enf_ms", "exec_ms", "total_ms", "sql")} |
+                      {k: c[k] for k in ("cache_hit", "cache_owner", "cache_wrong") if k in c} |
                       {"out": c["out"][:600]} for c in calls],
             "n_calls": len(calls), "usage": usage, "wall_s": wall,
-            "ni_leak": any(ni), "ni_leak_calls": sum(ni), "secrecy": secrecy, "kpi_releases": len(ex.releases)}
+            "ni_leak": any(ni), "ni_leak_calls": sum(ni), "secrecy": secrecy, "kpi_releases": len(ex.releases)} | (
+               {"ni_per_call": ni, "ni_per_pert": {k: sum(v) for k, v in ni_k.items()}} if cfg in appcache.CACHE_BASE else {})
