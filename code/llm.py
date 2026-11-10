@@ -18,13 +18,22 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 MODELS = {"ds-flash": ("deepseek", "deepseek-flash"), "ds-pro": ("deepseek", "deepseek-v4-pro"),
           "glm-air": ("glm2", "glm-4.5-air"), "kimi-k2.6": ("kimi", "kimi-k2.6"),
           "gpt-6-sol": ("llmhub", "gpt-6-sol"), "glm-5.3": ("llmhub", "glm-5.3"),
-          "claude-opus-5.5": ("llmhub", "claude-opus-5-5")}
+          "claude-opus-5.5": ("llmhub", "claude-opus-5-5"),
+          # newest models (2026-11-10): gateway and Volcano Ark; endpoints and keys only from the environment
+          "gpt-6.1-sol": ("llmhub", "gpt-6.1-sol"), "kimi-k3": ("llmhub", "Kimi-K3"),
+          "kimi-k2.6-gw": ("llmhub", "Kimi-K2.6"), "qwen3.8-think": ("qwenhub", "Qwen3.8-27B"),
+          "kimi-k3.1-pro": ("ark", "kimi-k3-1-pro-261024")}
 OFF = {"thinking": {"type": "disabled"}}
 FIXED = {"ds-flash": OFF, "ds-pro": OFF, "glm-air": OFF, "kimi-k2.6": {**OFF, "temperature": 0.6}, "glm-5.3": OFF,
-         "claude-opus-5.5": {"temperature": None}}  # its endpoint rejects the temperature parameter
+         "claude-opus-5.5": {"temperature": None}, "kimi-k3.1-pro": {"temperature": 1.0},  # Ark accepts only 1
+         "kimi-k2.6-gw": {**OFF, "temperature": 0.6}}
+if os.environ.get("KIMI_VIA_GATEWAY"):  # the vendor account was suspended on 2026-11-10: same model through the gateway
+    MODELS["kimi-k2.6"] = ("llmhub", "Kimi-K2.6")  # its endpoint rejects the temperature parameter
 # USD per 1M tokens (input, output); list prices used by the sibling sessions on 2026-11-03
 PRICES = {"glm-air": (0.20, 1.10), "ds-flash": (0.30, 1.20), "ds-pro": (1.32, 3.96), "kimi-k2.6": (0.95, 4.00),
-          "gpt-6-sol": (0.0, 0.0), "glm-5.3": (0.0, 0.0), "claude-opus-5.5": (0.0, 0.0)}  # served through the organisation's internal gateway; no list price recorded
+          "gpt-6-sol": (0.0, 0.0), "glm-5.3": (0.0, 0.0), "claude-opus-5.5": (0.0, 0.0),
+          "gpt-6.1-sol": (0.0, 0.0), "kimi-k3": (0.0, 0.0), "kimi-k2.6-gw": (0.0, 0.0), "qwen3.8-think": (0.0, 0.0),
+          "kimi-k3.1-pro": (0.0, 0.0)}  # served through the organisation's internal gateway; no list price recorded
 DAILY_CAP = float(os.environ.get("DAILY_CAP", 5.0))
 _lock = threading.Lock()
 _spent = {}
@@ -61,13 +70,18 @@ def chat(model, messages, tools=None, temperature=0.0, max_tokens=1200, rep=0, r
         raise RuntimeError(f"daily cap reached for {model}")
     if prov == "llmhub":  # OpenAI-compatible gateway; endpoint and key only from the environment, never stored
         cfg, err = {"base_url": os.environ["LLMHUB_BASE_URL"], "api_key": os.environ["LLMHUB_API_KEY"]}, None
+    elif prov == "qwenhub":  # the gateway's key for the Qwen thinking route
+        cfg, err = {"base_url": os.environ["LLMHUB_BASE_URL"], "api_key": os.environ["LLMHUB_QWEN_KEY"]}, None
+    elif prov == "ark":  # Volcano Ark (Kimi K3.1 Pro)
+        cfg, err = {"base_url": os.environ["ARK_BASE_URL"], "api_key": os.environ["ARK_API_KEY"]}, None
     else:
         cfg, err = KEYS[prov], None
     for i in range(retries):
         try:
             t0 = time.time()
             r = requests.post(cfg["base_url"].rstrip("/") + "/chat/completions",
-                              headers={"Authorization": "Bearer " + cfg["api_key"]}, json=body, timeout=180)
+                              headers={"Authorization": "Bearer " + cfg["api_key"]}, json=body,
+                              timeout=900 if prov == "qwenhub" else 180)  # thinking calls queue on a shared route
             lat = time.time() - t0
             if r.status_code != 200:
                 err = f"{r.status_code} {r.text[:300]}"

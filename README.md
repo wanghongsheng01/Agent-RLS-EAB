@@ -25,6 +25,10 @@ tool calls over governed relational data, and an application-layer result cache 
 | `code/appcache.py`, `code/run_cache.py`, `code/cache_stats.py` | Application-layer result cache (E9: shared, keyed on the SQL text, over E3T; E9M: shared, keyed on the metric request, over E4; E9S: keyed on the principal as well), its sequential stream driver, and its statistics |
 | `code/suite_x7.py`, `code/run_audit.py`, `code/audit_stats.py` | Split complement questions C3; streams of each domain's sessions per model and repetition for E3T, the per-session auditor E7, the per-principal auditor E7P, E7P with the isolation rule (E7PR), and the static safe subsets E7Z (finest first) and E7Zc (coarsest first; E7Z' in the paper); history-level statistics |
 | `code/horizon.py` | LLM-free replay of the published-figure requests over long histories: denial rates of E7P, E7Z and E7Zc |
+| `code/redteam.py`, `code/redteam_stats.py` | Adaptive red team: an attacker LLM (DeepSeek-V4-pro) opens up to six sessions with the agent and adapts to the answers; success by answer, own estimate, or determination by the union of releases |
+| `code/native_rls_more.py` | Loads TPC-DS and BIRD into the embedded PostgreSQL server with row policies and column grants (E5P on all four domains) |
+| `code/make_kappa_pack.py`, `annotation/` | Human audit of the automatic judge: 150 stratified sessions, annotation sheet, judge key, `compute_kappa.py` |
+| `code/check_marks.py` | Checks that marking best/second values in the tables changed no number |
 | `code/infer_all.py` | Inference leakage with every hidden atom (not itself a published group) treated as protected |
 | `code/audit_incr.py`, `code/audit_scaling.py` | Incremental auditor (Proposition 1), its agreement with the rank test and its time per release |
 | `code/cache_designs.py` | LLM-free replay of scope-keyed, per-user and below-gateway caches with 1, 3 or 9 users per role |
@@ -34,6 +38,7 @@ tool calls over governed relational data, and an application-layer result cache 
 | `data/suite.json`, `data/suite_x6.json`, `data/suite_x7.json` | The 169 questions with ground truth; the 15 follow-up questions C1 (complement differencing) and C2 (own group total); the 12 split complement questions C3 |
 | `logs/sessions*.jsonl.gz` | Every agent session: tool calls, arguments, responses, final answers, tokens, cost, latency |
 | `logs/appcache.tar.gz` | Sessions of the cache configurations, one file per stream (configuration, model, domain, repetition), and cache statistics |
+| `logs/redteam.tar.gz` | Red-team attacks, one file per configuration, agent and attempt |
 | `logs/auditstate.tar.gz` | Sessions of the auditor-state experiment (E3T, E7, E7P, E7PR, E7Z, E7Zc), one file per stream, with the releases of every session |
 | `logs/llm_cache.tar.gz` | Cached LLM responses: re-running the experiments reproduces all sessions without API calls |
 | `scripts/` | Database preparation |
@@ -45,7 +50,7 @@ pip install -r requirements.txt
 python scripts/prepare_bird.py /path/to/bird/dev_databases/financial/financial.sqlite
 python scripts/build_dbs.py
 mkdir -p pilot && for f in logs/*.jsonl.gz logs/*.json.gz; do gunzip -c $f > pilot/$(basename ${f%.gz}); done
-cp data/suite*.json pilot/ && tar -xzf logs/appcache.tar.gz -C pilot && tar -xzf logs/auditstate.tar.gz -C pilot
+cp data/suite*.json pilot/ && tar -xzf logs/appcache.tar.gz -C pilot && tar -xzf logs/auditstate.tar.gz -C pilot && tar -xzf logs/redteam.tar.gz -C pilot
 python paper_tools/make_numbers.py && python paper_tools/make_figs.py && python paper_tools/make_fig_cache.py
 ```
 
@@ -68,15 +73,25 @@ of the form `{"<provider>": {"base_url": ..., "api_key": ...}}` and extend `MODE
 | `sessions_more_reps.jsonl` | GLM-5.3 and DeepSeek-V4-pro, repetitions 2 and 3 of the same core configurations | 2 |
 | `sessions_external.jsonl` | E2X and E6X: GPT-6 as verifier and output guard of the DeepSeek-V4-flash and Kimi-K2.6 agents | 1 |
 | `sessions_e3d.jsonl` | E3D, the data-independent non-Truman check (static scope implication plus rewrite), main grid | 3 |
-| `appcache/E9*_<model>_<domain>_r<rep>.jsonl` | E9, E9M and E9S, main grid (3 repetitions); E9 and E9M for DeepSeek-V4-pro, GLM-5.3, GPT-6 and Claude-Opus-5.5 | 3; 1 |
+| `appcache/E9*_<model>_<domain>_r<rep>.jsonl` | E9, E9M and E9S, main grid (3 repetitions); E9 and E9M for DeepSeek-V4-pro, GLM-5.3, GPT-6 and Claude-Opus-5.5; E9 for GPT-6.1, Kimi-K3 and Kimi-K3.1-Pro | 3; 1 |
 | `auditstate/<cfg>_<model>_<domain>_r<rep>.jsonl` | E3T, E7, E7P, E7PR, E7Z and E7Zc on all questions including C1--C3, one shuffled stream per model and repetition, main grid | 3 |
-| `sessions_e5p.jsonl` | E5P, PostgreSQL 16 row-level security in the agent loop (TPC-H, production policy model), main grid; needs the databases built by `code/native_rls.py` | 3 |
+| `sessions_e5p.jsonl` | E5P, PostgreSQL 16 row-level security in the agent loop on all four domains (DeepSeek-V4-flash and GLM-4.5-air; Kimi-K2.6 on TPC-H and the production policy model); needs the databases built by `code/native_rls.py` and `code/native_rls_more.py` | 3 |
+| `sessions_e8s.jsonl` | E8S, the recommended E8 with the user's scope stated in the prompt (DeepSeek-V4-flash, GLM-4.5-air; Kimi-K2.6 served through the organization's gateway) | 3 |
+| `sessions_newest.jsonl` | GPT-6.1 (gpt-6.1-sol), Kimi-K3 (gateway) and Kimi-K3.1-Pro (`kimi-k3-1-pro-261024`, Volcano Ark): E0, E3T, E4M, E7 and E8 on all questions | 1 |
+| `kimi_channel_check.jsonl` | Kimi-K2.6 E0/E3T sessions (TPC-H, BIRD, repetition 0) re-run through the organization's gateway; `code/kimi_channel_check.py` compares them with the vendor API | 1 |
 
 Files whose name contains `side`, and the partial runs above, come from parallel runs (some walking the grid in reverse
 order to finish sooner). A session key `(question, configuration, model, repetition)` can therefore appear in two files; `code/score.py` keeps the first
 occurrence, reading `sessions.jsonl` first and the other files in name order. GLM-5.3, GPT-6 and Claude-Opus-5.5 were
 called through an OpenAI-compatible gateway whose endpoint and key are read from `LLMHUB_BASE_URL` and
-`LLMHUB_API_KEY`. Local paths that some agents printed by listing engine settings are replaced by `/work/...`.
+`LLMHUB_API_KEY`. The Kimi vendor account was suspended on 2026-11-10; Kimi-K2.6 sessions that `sessions_e8s.jsonl` and
+`sessions_e5p.jsonl` (BIRD, TPC-DS) hold were run through the organization's gateway, which `code/kimi_channel_check.py`
+found not equivalent to the vendor API (outcome agreement 81% against 93% between two vendor repetitions; attack leakage
+9.5% vs. 34.5%). `paper_tools/make_numbers.py` therefore keeps them as a separate deployment, `kimi-k2.6-gw`: they are
+never pooled with vendor-API Kimi-K2.6 sessions, the gateway-served E0/E3T sessions form the "Kimi (gw)" column of
+Table VII, and the paired E8S comparison uses the models with a complete vendor-API grid (DeepSeek-V4-flash, GLM-4.5-air).
+Kimi-K3.1-Pro is called on Volcano Ark (`ARK_BASE_URL`, `ARK_API_KEY`; temperature 1.0, the only value the endpoint
+accepts). `code/with_keys.sh` shows how the run scripts take every key from the environment. Local paths that some agents printed by listing engine settings are replaced by `/work/...`.
 
 ## Changelog of the harness before the final runs
 

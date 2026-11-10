@@ -10,6 +10,15 @@ from score import load, SUITE, wilson, iter_sessions, judge  # noqa: E402
 
 OUT = os.path.join(HERE, "paper_out")
 ALL = load(os.path.join(HERE, "pilot", "sessions.jsonl"))
+# Kimi-K2.6 sessions run through the organization's gateway after the vendor account was suspended (E8S; E5P on BIRD and
+# TPC-DS; the channel check of code/kimi_channel_check.py) are a separate deployment: kept apart as kimi-k2.6-gw
+for r in ALL:
+    if r["model"] == "kimi-k2.6" and (r["cfg"] == "E8S" or (r["cfg"] == "E5P" and r["dom"] in ("bird", "tpcds"))):
+        r["model"] = "kimi-k2.6-gw"
+from score import judge as _judge  # noqa: E402
+for _l in open(os.path.join(HERE, "pilot", "kimi_channel_check.jsonl")):
+    _s = json.loads(_l)
+    ALL.append({**_judge(_s), "cfg": _s["cfg"], "model": "kimi-k2.6-gw", "rep": _s["rep"], "qid": _s["qid"]})
 XALL = [r for r in ALL if r["cat"].startswith("C") or r["cfg"] == "E7S"]  # follow-up X6 (suite_x6.py), reported apart
 ALL = [r for r in ALL if not (r["cat"].startswith("C") or r["cfg"] == "E7S")]
 BAL_MODELS = {"ds-flash", "glm-air", "kimi-k2.6"}
@@ -26,7 +35,11 @@ DOMS = [("tpch", "TPC-H"), ("tpcds", "TPC-DS"), ("bird", "BIRD"), ("ent", "Produ
 MODELS = [("ds-flash", "DS-flash"), ("ds-pro", "DS-pro"), ("glm-air", "GLM-air"), ("glm-5.3", "GLM-5.3"), ("kimi-k2.6", "Kimi"),
           ("gpt-6-sol", "GPT-6"), ("claude-opus-5.5", "Claude")]
 VENDOR = {"ds-flash": "DeepSeek", "ds-pro": "DeepSeek", "glm-air": "Zhipu", "glm-5.3": "Zhipu", "kimi-k2.6": "Moonshot",
-          "gpt-6-sol": "OpenAI", "claude-opus-5.5": "Anthropic"}
+          "gpt-6-sol": "OpenAI", "claude-opus-5.5": "Anthropic", "gpt-6.1-sol": "OpenAI", "kimi-k3": "Moonshot",
+          "kimi-k3.1-pro": "Moonshot", "qwen3.8-think": "Alibaba", "kimi-k2.6-gw": "Moonshot"}
+# newest models (2026-11-10), core configurations, one repetition; reported per model only
+NEWEST = [("gpt-6.1-sol", "GPT-6.1"), ("kimi-k3", "Kimi-K3"), ("kimi-k3.1-pro", "Kimi-K3.1"),
+          ("kimi-k2.6-gw", "Kimi (gw)")]  # Qwen3.8 thinking: text only
 
 ben = lambda r: r["cat"] in ("B1", "B3")
 att = lambda r: r["cat"].startswith("A")
@@ -79,8 +92,9 @@ N["nSessionsMain"] = f"{len(rows):,}".replace(",", "{,}")
 N["nItems"] = str(len({r['qid'] for r in rows}))
 N["nPrincipals"] = str(len({(r['dom'], SUITE[r['qid']]['p']) for r in rows}))
 N["nModels"] = str(len({r['model'] for r in rows}))
-_WORDS = {3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight"}
-N["nModelsAllWord"] = _WORDS[len({r['model'] for r in ALL})]
+_WORDS = {3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven",
+          12: "twelve"}
+N["nModelsAllWord"] = _WORDS[len({r['model'].replace("-gw", "") for r in ALL})]  # a model, not a deployment
 N["nVendorsWord"] = _WORDS[len({VENDOR[r["model"]] for r in ALL})]
 sd = {c: rate(sel(c, a3), "secrecy")[0] for c in CFGS}
 N["secDetLo"], N["secDetHi"] = f"{min(sd[c] for c in VIEW):.0f}", f"{max(sd[c] for c in VIEW):.0f}"
@@ -158,14 +172,48 @@ for _c, _n in (("E3N", "NT"), ("E3D", "D")):
     N["sd" + _n + "Leak"] = pc([r for r in _R if att(r)], "leak")
     N["sd" + _n + "Ni"] = pc(_R, "ni")
     N["sd" + _n + "Calls"] = f"{sum(r['n_llm'] for r in _R) / max(1, len(_R)):.1f}"
+_e5k = {(r["qid"], r["model"], r["rep"]) for r in _grp("E5P", BAL_MODELS, (0, 1, 2))}  # paired with E3T, all domains
 for _c, _n in (("E3T", "T"), ("E5P", "P")):
-    _R = _grp(_c, BAL_MODELS, (0, 1, 2), ("tpch", "ent"))
+    _R = [r for r in _grp(_c, BAL_MODELS, (0, 1, 2)) if (r["qid"], r["model"], r["rep"]) in _e5k]
     N["db" + _n + "Acc"] = pc([r for r in _R if ben(r)], "correct")
     N["db" + _n + "Leak"] = pc([r for r in _R if att(r)], "leak")
     N["db" + _n + "Ni"] = pc(_R, "ni")
     N["db" + _n + "Mis"] = pc([r for r in _R if b2(r)], "misleading")
     N["db" + _n + "Inf"] = pc([r for r in _R if a3(r)], "secrecy")
-N["nEfiveP"] = str(len(_grp("E5P", BAL_MODELS, (0, 1, 2), ("tpch", "ent"))))
+N["nEfiveP"] = f"{len(_e5k):,}".replace(",", "{,}")
+# recommended configuration with the scope stated (E8S), paired with E0, E3T and E8 on the same sessions
+_e8k = {(r["qid"], r["model"], r["rep"]) for r in _grp("E8S", BAL_MODELS, (0, 1, 2))}
+_e8full = {m for m in BAL_MODELS if sum(k[1] == m for k in _e8k) >= 0.95 * 3 * len([q for q in SUITE.values() if not q["cat"].startswith("C") and "-C" not in q["qid"]])}
+_e8k = {k for k in _e8k if k[1] in _e8full and k[1] != "kimi-k2.6-gw"}  # complete E8S grids with vendor-API baselines
+_e8m = sorted({k[1] for k in _e8k}, key=lambda m: [x for x, _ in MODELS].index(m))
+N["eSModels"] = " and ".join(dict(MODELS)[m] for m in _e8m) if len(_e8m) < 3 else "the main-grid models"
+N["nEeightS"] = f"{len(_e8k):,}".replace(",", "{,}")
+for _c, _n in (("E0", "Zero"), ("E3T", "T"), ("E8", "Eight"), ("E8S", "S")):
+    _R = [r for r in _grp(_c, BAL_MODELS, (0, 1, 2)) if (r["qid"], r["model"], r["rep"]) in _e8k]
+    N["eS" + _n + "Acc"] = pc([r for r in _R if ben(r)], "correct")
+    N["eS" + _n + "Leak"] = pc([r for r in _R if att(r)], "leak")
+    N["eS" + _n + "Mis"] = pc([r for r in _R if b2(r)], "misleading")
+    N["eS" + _n + "Inf"] = pc([r for r in _R if a3(r)], "secrecy")
+    N["eS" + _n + "Usd"] = f"{1000 * sum(r['usd'] for r in _R) / max(1, len(_R)):.2f}"
+    N["eS" + _n + "Calls"] = f"{sum(r['n_llm'] for r in _R) / max(1, len(_R)):.1f}"
+    N["eS" + _n + "Wall"] = f"{sum(r['wall'] for r in _R) / max(1, len(_R)):.1f}"
+_qw = [r for r in ALL if r["model"] == "qwen3.8-think"]
+for _c, _n in (("E0", "Zero"), ("E3T", "T"), ("E8", "Eight")):
+    N["qw" + _n + "Inf"] = pc([r for r in _qw if r["cfg"] == _c and a3(r)], "secrecy")
+    N["qw" + _n + "Athree"] = pc([r for r in _qw if r["cfg"] == _c and a3(r)], "leak")
+    N["qw" + _n + "Mis"] = pc([r for r in _qw if r["cfg"] == _c and b2(r)], "misleading")
+N["nQwen"] = str(len(_qw))
+_nw = ("gpt-6.1-sol", "kimi-k3", "kimi-k3.1-pro")
+_nwv = lambda c, pred, key: [rate([r for r in ALL if r["model"] == m and r["cfg"] == c and pred(r)], key)[0]  # noqa: E731
+                             for m in _nw if any(r["model"] == m and r["cfg"] == c for r in ALL)]
+for _k, _v in (("nwInf", _nwv("E3T", a3, "secrecy")), ("nwMix", _nwv("E4M", att, "leak")),
+               ("nwEight", _nwv("E8", att, "leak")), ("nwSeven", _nwv("E7", att, "leak"))):
+    N[_k + "Lo"], N[_k + "Hi"] = (f"{min(_v):.0f}", f"{max(_v):.0f}") if _v else ("--", "--")
+_kc = json.load(open(os.path.join(HERE, "pilot", "kimi_channel_check.json")))
+N["kcN"] = str(_kc["sessions"])
+N["kcAgree"] = f'{_kc["outcome_agreement_gateway_vs_vendor"]:.0f}'
+N["kcAgreeRep"] = f'{_kc["outcome_agreement_vendor_rep1_vs_rep0"]:.0f}'
+N["kcLeakGw"], N["kcLeakVendor"] = f'{_kc["attack_leakage"]["gateway"]:.1f}', f'{_kc["attack_leakage"]["vendor"]:.1f}'
 N["nRoundThree"] = f"{sum(1 for r in ALL if r['cfg'] in ('E2X', 'E6X', 'E3D', 'E5P')):,}".replace(",", "{,}")
 N["toolCallsMean"] = f"{sum(r['n_calls'] for r in rows) / len(rows):.1f}"
 N["aThreeMulti"] = f"{100 * sum(r['n_calls'] >= 2 for r in rows if a3(r)) / max(1, sum(1 for r in rows if a3(r))):.0f}"
@@ -181,7 +229,7 @@ inc = {c: rate(sel(c, lambda r: r["cat"].startswith("B")), "secrecy")[0] for c i
 N["incidLo"], N["incidHi"] = f"{min(inc.values()):.0f}", f"{max(inc.values()):.0f}"
 _all_main = [r for r in ALL if r["cfg"] in MAIN_CFGS]
 lpm = [rate([r for r in _all_main if r["cfg"] == "E0" and r["model"] == m and att(r)], "leak")[0]
-       for m, _ in MODELS if any(r["model"] == m for r in _all_main)]
+       for m, _ in MODELS + NEWEST if any(r["model"] == m for r in _all_main)]
 for _m, _p in (("glm-5.3", "glm"), ("gpt-6-sol", "gpt"), ("claude-opus-5.5", "cld")):  # frontier-tier models
     _g = [r for r in _all_main if r["model"] == _m]
     if not _g:
@@ -265,6 +313,53 @@ def cell(R, key, ci=False):
     p, lo, hi = wilson(sum(bool(r.get(key)) for r in R), n)
     return f"{v:.0f}\\,{{\\tiny[{100 * lo:.0f},{100 * hi:.0f}]}}"
 
+
+
+# ---------------------------------------------------------------- best (bold) / second best (underline) per column
+_NUM = _re_mark = None
+
+
+def mark_rows(rows, dirs, sep=None, count_cols=None):
+    """rows: table rows 'label & c1 & ... \\\\'; dirs[j] = +1 (higher is better), -1 (lower is better) or None per
+    column (a list per column when cells hold several values separated by `sep`). Ranks by the printed value; ties share
+    a mark. Returns the marked rows and, per row, (#best, #second) over count_cols (all ranked columns if None)."""
+    import re as _r
+    num = _r.compile(r"-?[\d,]*\.?\d+")
+    cells = [r.rstrip().rstrip("\\").rstrip().split(" & ") for r in rows]
+    nc = len(cells[0]) - 1
+    marks = [[None] * nc for _ in rows]
+    out = [list(c) for c in cells]
+    cnt = [[0, 0] for _ in rows]
+    for j in range(nc):
+        dj = dirs[j]
+        if dj is None:
+            continue
+        comps = dj if isinstance(dj, list) else [dj]
+        parts = [(c[j + 1].split(sep) if sep and isinstance(dj, list) else [c[j + 1]]) for c in cells]
+        newparts = [list(p) for p in parts]
+        for k, d in enumerate(comps):
+            if d is None:
+                continue
+            vals = []
+            for i, p in enumerate(parts):
+                m = num.search(p[k]) if k < len(p) else None
+                vals.append(float(m.group(0).replace(",", "")) if m and "--" not in p[k] else None)
+            dist = sorted({v for v in vals if v is not None}, reverse=(d > 0))
+            for i, v in enumerate(vals):
+                if v is None or not dist:
+                    continue
+                rank = 0 if v == dist[0] else (1 if len(dist) > 1 and v == dist[1] else None)
+                if rank is None:
+                    continue
+                m = num.search(newparts[i][k])
+                tok = m.group(0)
+                wrap = "\\textbf{%s}" if rank == 0 else "\\underline{%s}"
+                newparts[i][k] = newparts[i][k][:m.start()] + (wrap % tok) + newparts[i][k][m.end():]
+                if count_cols is None or j in count_cols:
+                    cnt[i][rank] += 1
+        for i in range(len(rows)):
+            out[i][j + 1] = (sep.join(newparts[i]) if sep and isinstance(dj, list) else newparts[i][0])
+    return [" & ".join(c) + "\\\\" for c in out], cnt
 
 
 # ---------------------------------------------------------------- template-clustered bootstrap (items share templates)
@@ -416,15 +511,18 @@ def abl_sel(cfg, pred):
 
 ABLT = ["\\begin{table}[t]", "\\centering",
         "\\caption{Prompt ablations (" + ", ".join(dict(MODELS)[m] for m in abl_models) + ", one repetition; \\%). \\E{E3T}/\\E{E3N}+P state the "
-        "user's scope in the prompt; \\E{E4M}+T tells the agent that raw SQL is unfiltered, and \\E{E4M}+H also states the policy.}",
+        "user's scope in the prompt; \\E{E4M}+T tells the agent that raw SQL is unfiltered, and \\E{E4M}+H also states the policy. "
+        "\\textbf{Bold}: best, \\underline{underline}: second best per column.}",
         "\\label{tab:ablate}", "\\scriptsize", "\\setlength{\\tabcolsep}{2.5pt}", "\\begin{tabular}{lcccccc}", "\\toprule",
         "Config. & Benign acc. & False ref. & B2 mislead & Attack leak & Inf. (A3) & LLM calls\\\\", "\\midrule"]
+_ab = []
 for a in ("E0", "E3T", "E3TP", "E3N", "E3NP", "E4M", "E4MT", "E4MH"):
     lab = {"E3TP": "\\E{E3T}+P", "E3NP": "\\E{E3N}+P", "E4MH": "\\E{E4M}+H", "E4MT": "\\E{E4M}+T"}.get(a, f"\\E{{{a}}}")
     R = abl_sel(a, lambda r: True)
-    ABLT.append(f"{lab} & {cell(abl_sel(a, ben), 'correct')} & {cell(abl_sel(a, ben), 'refused')} & "
+    _ab.append(f"{lab} & {cell(abl_sel(a, ben), 'correct')} & {cell(abl_sel(a, ben), 'refused')} & "
                 f"{cell(abl_sel(a, b2), 'misleading')} & {cell(abl_sel(a, att), 'leak')} & {cell(abl_sel(a, a3), 'secrecy')} & "
                 f"{sum(r['n_llm'] for r in R) / max(1, len(R)):.1f}\\\\")
+ABLT += mark_rows(_ab, [+1, -1, -1, -1, -1, -1])[0]
 ABLT += ["\\bottomrule", "\\end{tabular}", "\\end{table}"]
 open(os.path.join(OUT, "tab_ablate.tex"), "w").write("\n".join(ABLT) + "\n")
 N["abEfourMTLeak"] = cell(abl_sel("E4MT", att), "leak")
@@ -575,6 +673,19 @@ for _k in IDX:
 N["capNT"] = _r(100 * _capr["E3N"][0] / _capr["E3N"][1])
 N["capOther"] = _r(max(100 * v[0] / v[1] for c, v in _capr.items() if c != "E3N"))
 
+# adaptive red team (code/redteam.py, code/redteam_stats.py)
+import redteam_stats  # noqa: E402
+redteam_stats.main()
+RT = json.load(open(os.path.join(HERE, "pilot", "redteam_stats.json")))
+for _c, _n in (("E0", "Zero"), ("E3T", "T"), ("E4M", "Mix"), ("E7", "Seven"), ("E7P", "SevenP"), ("E8", "Eight")):
+    if _c in RT:
+        N["rtSucc" + _n] = _r(RT[_c]["success"]); N["rtAns" + _n] = _r(RT[_c]["answer_hit"])
+        N["rtEst" + _n] = _r(RT[_c]["estimate_hit"]); N["rtDet" + _n] = _r(RT[_c]["determined"])
+_rta = [k for k in RT if "|" not in k]
+N["rtAttacks"] = str(sum(RT[k]["n"] for k in _rta))
+N["rtPerCfg"] = str(min(RT[k]["n"] for k in _rta)) if _rta else "0"
+N["nSessions"] = f"{len(ALL) + len(XALL) + _ncache + _au['new'][0] + sum(RT[k]['sessions'] for k in _rta):,}".replace(",", "{,}")
+
 with open(os.path.join(OUT, "numbers.tex"), "w") as f:
     f.write("% generated by tools/make_numbers.py -- do not edit\n")
     W = {"0": "zero", "1": "one", "2": "two", "3": "three", "4": "four", "5": "five", "6": "six", "7": "seven",
@@ -589,18 +700,25 @@ L = ["\\begin{table*}[t]", "\\centering",
      "Leak = answer leakage on attacks (A1--A4); Inf.\\ = inference leakage (Def.~3) in differencing sessions (A3); "
      "Trace = noninterference violations (Def.~2) over all sessions; Mislead = Truman-misleading rate on B2. "
      "Wilson intervals are per session; template-clustered intervals for key differences are given in the text. "
-     "Cost columns are per session; latency is original LLM latency plus tool time. $^\\ddagger$Zero by construction: the "
+     "Cost columns are per session (Calls: LLM calls); latency is original LLM latency plus tool time. $^\\ddagger$Zero by construction: the "
      "auditor applies the test of Def.~3 before every release. \\E{E3D} (same grid) is reported apart from the nine "
-     "configurations of Fig.~\\ref{fig:tradeoff}.}",
+     "configurations of Fig.~\\ref{fig:tradeoff}. Per column, \\textbf{bold} marks the best and \\underline{underline} the "
+     "second-best printed value among the nine (ties share the mark); B/S counts the seven quality columns left of the "
+     "bar in which a configuration is best/second.}",
      "\\label{tab:main}", "\\small", "\\setlength{\\tabcolsep}{2.9pt}",
-     "\\begin{tabular}{lccccccc|cccc}", "\\toprule",
-     " & Benign acc. & False ref. & B2 mislead & B2 correct & Leak & Inf. (A3) & Trace & Tokens & \\$\\,$\\times10^{-3}$ & LLM calls & Latency (s)\\\\",
+     "\\begin{tabular}{lccccccc|cccc|c}", "\\toprule",
+     " & Benign acc. & False ref. & B2 mislead & B2 corr. & Leak & Inf. (A3) & Trace & Tokens & \\$\\,$\\times10^{-3}$ & Calls & Lat.\\,(s) & B/S\\\\",
      "\\midrule"]
 NAME = {"E0": "prompt", "E2": "verifier", "E6": "guard", "E3T": "rewrite", "E3N": "reject", "E4": "metric",
         "E4M": "metric+SQL", "E7": "audit", "E8": "audit+note", "E3D": "reject-static"}
 _rows3d = [r for r in ALL if r["cfg"] == "E3D" and r["model"] in BAL_MODELS and r["rep"] in (0, 1, 2)]
+_mrows = []
 for c in CFGS + ["E3D"]:
     if c == "E3D":
+        _mk, _cnt = mark_rows(_mrows, [+1, -1, -1, +1, -1, -1, -1, -1, -1, -1, -1], count_cols=range(7))
+        L += [r[:-2] + f" & {b}/{t}\\\\" for r, (b, t) in zip(_mk, _cnt)]
+        N["mainBestEight"], N["mainSecondEight"] = str(_cnt[CFGS.index("E8")][0]), str(_cnt[CFGS.index("E8")][1])
+        N["mainBestSeven"], N["mainSecondSeven"] = str(_cnt[CFGS.index("E7")][0]), str(_cnt[CFGS.index("E7")][1])
         L.append("\\midrule")
         _s = lambda pred=lambda r: True: [r for r in _rows3d if pred(r)]  # noqa: E731
     else:
@@ -608,56 +726,76 @@ for c in CFGS + ["E3D"]:
     R = _s()
     n = len(R)
     inf = cell(_s(a3), "secrecy") + ("$^\\ddagger$" if c in ("E7", "E8") else "")
-    L.append(f"\\E{{{c}}} {NAME[c]} & {cell(_s(ben), 'correct', True)} & {cell(_s(ben), 'refused')} & "
-             f"{cell(_s(b2), 'misleading')} & {cell(_s(b2), 'correct')} & {cell(_s(att), 'leak', True)} & "
-             f"{inf} & {cell(R, 'ni')} & {sum(r['tok'] for r in R) / n:,.0f} & "
-             f"{1000 * sum(r['usd'] for r in R) / n:.2f} & {sum(r['n_llm'] for r in R) / n:.1f} & {sum(r['wall'] for r in R) / n:.1f}\\\\")
+    _row = (f"\\E{{{c}}} {NAME[c]} & {cell(_s(ben), 'correct', True)} & {cell(_s(ben), 'refused')} & "
+            f"{cell(_s(b2), 'misleading')} & {cell(_s(b2), 'correct')} & {cell(_s(att), 'leak', True)} & "
+            f"{inf} & {cell(R, 'ni')} & {sum(r['tok'] for r in R) / n:,.0f} & "
+            f"{1000 * sum(r['usd'] for r in R) / n:.2f} & {sum(r['n_llm'] for r in R) / n:.1f} & {sum(r['wall'] for r in R) / n:.1f}\\\\")
+    if c == "E3D":
+        L.append(_row[:-2] + " & \\\\")
+    else:
+        _mrows.append(_row)
 L += ["\\bottomrule", "\\end{tabular}", "\\end{table*}"]
 open(os.path.join(OUT, "tab_main.tex"), "w").write("\n".join(L) + "\n")
+with open(os.path.join(OUT, "numbers.tex"), "a") as f:  # counts known only once the table is marked
+    for _k in ("mainBestEight", "mainSecondEight", "mainBestSeven", "mainSecondSeven"):
+        f.write(f"\\newcommand{{\\{_k}}}{{{N[_k]}}}\n")
 
 L = ["\\begin{table*}[t]", "\\centering",
      "\\caption{Per-domain results (\\%): benign accuracy / attack answer leakage / inference leakage in A3 sessions / "
-     "Truman-misleading rate on B2.}", "\\label{tab:dom}", "\\small", "\\setlength{\\tabcolsep}{4pt}",
-     "\\begin{tabular}{l" + "c" * len(DOMS) + "}", "\\toprule", " & " + " & ".join(n for _, n in DOMS) + "\\\\", "\\midrule"]
+     "Truman-misleading rate on B2. Per domain and metric, \\textbf{bold} marks the best and \\underline{underline} the "
+     "second-best value among the nine configurations (ties share the mark); B/S counts them over all 16 values of a row.}",
+     "\\label{tab:dom}", "\\small", "\\setlength{\\tabcolsep}{4pt}",
+     "\\begin{tabular}{l" + "c" * len(DOMS) + "c}", "\\toprule", " & " + " & ".join(n for _, n in DOMS) + " & B/S\\\\", "\\midrule"]
+_dr = []
 for c in CFGS:
-    L.append(f"\\E{{{c}}} & " + " & ".join(
+    _dr.append(f"\\E{{{c}}} & " + " & ".join(
         f"{cell(sel(c, ben, dom=d), 'correct')} / {cell(sel(c, att, dom=d), 'leak')} / {cell(sel(c, a3, dom=d), 'secrecy')} / "
         f"{cell(sel(c, b2, dom=d), 'misleading')}" for d, _ in DOMS) + "\\\\")
+_mk, _cnt = mark_rows(_dr, [[+1, -1, -1, -1]] * len(DOMS), sep=" / ")
+L += [r[:-2] + f" & {b}/{t}\\\\" for r, (b, t) in zip(_mk, _cnt)]
 L += ["\\bottomrule", "\\end{tabular}", "\\end{table*}"]
 open(os.path.join(OUT, "tab_dom.tex"), "w").write("\n".join(L) + "\n")
 
-MODELS = [(m, n) for m, n in MODELS if any(r["model"] == m for r in ALL)]
-_reps = {m: (len({r["rep"] for r in ALL if r["model"] == m and r["cat"] == "B1"}),
-             len({r["rep"] for r in ALL if r["model"] == m and r["cat"] != "B1"})) for m, _ in MODELS}
+MODELS = [(m, n) for m, n in MODELS + NEWEST if any(r["model"] == m for r in ALL)]
+_reps = {m: (len({r["rep"] for r in ALL if r["model"] == m and r["cfg"] in MAIN_CFGS and r["cat"] == "B1"}),
+             len({r["rep"] for r in ALL if r["model"] == m and r["cfg"] in MAIN_CFGS and r["cat"] != "B1"}))
+         for m, _ in MODELS if m != "kimi-k2.6-gw"}  # repetitions of the configurations the table shows; gw: below
 _nm = dict(MODELS)
 _all3 = [_nm[m] for m, (b, o) in _reps.items() if b == 3]
 _part = [_nm[m] for m, (b, o) in _reps.items() if b == 1 and o == 3]
 _one = [_nm[m] for m, (b, o) in _reps.items() if b == 1 and o == 1]
 _and = lambda xs: ", ".join(xs[:-1]) + (", and " if len(xs) > 2 else " and ") + xs[-1] if len(xs) > 1 else "".join(xs)  # noqa: E731
 REPS_NOTE = (_and(_all3) + " run three repetitions" + ("; " + _and(_part) + " run three repetitions of \\E{E0}, \\E{E3T}, \\E{E4M}, \\E{E7}, and \\E{E8} on all "
-             "but the in-scope questions (B1), and one otherwise" if _part else "") + ("; " + _and(_one) + (" runs" if len(_one) == 1 else " run") + " one" if _one else "") + ".")
+             "but the in-scope questions (B1), and one otherwise" if _part else "") + ("; " + _and(_one) + (" runs" if len(_one) == 1 else " run") + " one repetition of " + "\\E{E0}, \\E{E3T}, \\E{E4M}, \\E{E7}, and \\E{E8}" if _one else "")
+             + "; Kimi (gw) is Kimi-K2.6 served through the organization's gateway and runs one repetition of \\E{E0} and \\E{E3T} on TPC-H and "
+             "BIRD only; -- marks configurations a model did not run.")
 L = ["\\begin{table*}[t]", "\\centering",
      "\\caption{Per-model results (\\%): benign accuracy / attack answer leakage / Truman-misleading rate on B2; bottom rows: "
      "inference leakage on differencing questions (A3) under \\E{E3T}, answer leakage on their share and explicit variants "
      "under \\E{E0}, and sessions with a trace violation under the shared result caches (\\E{E9}, \\E{E9M}; without a cache: 0 "
      "for every model). " + REPS_NOTE + " The cache rows run three repetitions for DS-flash, GLM-air, and Kimi, one for "
-     "the others.}",
-     "\\label{tab:model}", "\\footnotesize", "\\setlength{\\tabcolsep}{5pt}",
-     "\\begin{tabular}{l" + "c" * len(MODELS) + "}", "\\toprule", " & " + " & ".join(n for _, n in MODELS) + "\\\\", "\\midrule"]
+     "the others. Per model and metric, \\textbf{bold} marks the best and \\underline{underline} the second-best value among "
+     "the nine configurations (ties share the mark); B/S counts them over the 21 values of a row.}",
+     "\\label{tab:model}", "\\footnotesize", "\\setlength{\\tabcolsep}{4.8pt}",
+     "\\begin{tabular}{l" + "c" * len(MODELS) + "c}", "\\toprule", " & " + " & ".join(n for _, n in MODELS) + " & B/S\\\\", "\\midrule"]
 rows_bal = rows
 rows = [r for r in ALL if r["cfg"] in MAIN_CFGS]  # per-model table: every model, every repetition
+_pr = []
 for c in CFGS:
-    L.append(f"\\E{{{c}}} & " + " & ".join(
+    _pr.append(f"\\E{{{c}}} & " + " & ".join(
         f"{cell(sel(c, ben, model=m), 'correct')}/{cell(sel(c, att, model=m), 'leak')}/{cell(sel(c, b2, model=m), 'misleading')}"
         for m, _ in MODELS) + "\\\\")
+_mk, _cnt = mark_rows(_pr, [[+1, -1, -1]] * len(MODELS), sep="/")
+L += [r[:-2] + f" & {b}/{t}\\\\" for r, (b, t) in zip(_mk, _cnt)]
 L.append("\\midrule")
-L.append("Inf.\\ A3, \\E{E3T} & " + " & ".join(cell(sel("E3T", a3, model=m), "secrecy") for m, _ in MODELS) + "\\\\")
+L.append("Inf.\\ A3, \\E{E3T} & " + " & ".join(cell(sel("E3T", a3, model=m), "secrecy") for m, _ in MODELS) + " & \\\\")
 L.append("Share, \\E{E0} & " + " & ".join(cell(sel("E0", lambda r: a3(r) and r["qid"].endswith("-1"), model=m), "leak")
-                                           for m, _ in MODELS) + "\\\\")
+                                           for m, _ in MODELS) + " & \\\\")
 L.append("Explicit, \\E{E0} & " + " & ".join(cell(sel("E0", lambda r: a3(r) and r["qid"].endswith("-0"), model=m), "leak")
-                                              for m, _ in MODELS) + "\\\\")
+                                              for m, _ in MODELS) + " & \\\\")
 for _c in ("E9", "E9M"):
-    L.append(f"Trace, \\E{{{_c}}} & " + " & ".join(f"{CS[f'{_c}|{m}']['ni']:.0f}" for m, _ in MODELS) + "\\\\")
+    L.append(f"Trace, \\E{{{_c}}} & " + " & ".join(f"{CS[f'{_c}|{m}']['ni']:.0f}" if f"{_c}|{m}" in CS else "--"
+                                                     for m, _ in MODELS) + " & \\\\")
 L += ["\\bottomrule", "\\end{tabular}", "\\end{table*}"]
 open(os.path.join(OUT, "tab_model.tex"), "w").write("\n".join(L) + "\n")
 rows = rows_bal

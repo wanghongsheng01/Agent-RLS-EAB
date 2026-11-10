@@ -24,7 +24,7 @@ from domains import DOMAINS, inlist, PILOT
 MAX_ROWS, MAX_CHARS, TIMEOUT = 50, 4000, 20
 CONFIGS = ["E0", "E2", "E6", "E3T", "E3N", "E4", "E4M", "E7", "E8"]
 # ablations: same mechanisms, different system prompt (scope stated / honest description of the raw SQL tool)
-ABLATION_BASE = {"E3TP": "E3T", "E3NP": "E3N", "E4MH": "E4M", "E4MT": "E4M", "E8P": "E8", "E7S": "E3T", "E2X": "E2", "E6X": "E6", "E3D": "E3N", "E5P": "E3T", "E7P": "E7", "E7Z": "E3T", "E7Zc": "E3T", "E7PR": "E7"}
+ABLATION_BASE = {"E3TP": "E3T", "E3NP": "E3N", "E4MH": "E4M", "E4MT": "E4M", "E8P": "E8", "E7S": "E3T", "E2X": "E2", "E6X": "E6", "E3D": "E3N", "E5P": "E3T", "E7P": "E7", "E7Z": "E3T", "E7Zc": "E3T", "E7PR": "E7", "E8S": "E8"}
 _local = threading.local()
 
 

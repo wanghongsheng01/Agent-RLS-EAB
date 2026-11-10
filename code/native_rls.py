@@ -31,6 +31,8 @@ def pgtype(t):
 
 
 def row_predicates(d, p):
+    if hasattr(d, "row_preds"):  # TPC-DS and BIRD: the same predicates as the gateway rewrite, on schema main
+        return {t: pr for t, pr in d.row_preds(p, "main").items() if pr}
     if d.name == "tpch":
         k = d.vis_keys(p)
         cust = f"SELECT c_custkey FROM main.customer WHERE c_nationkey IN {k}"
