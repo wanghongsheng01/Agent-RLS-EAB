@@ -21,9 +21,10 @@ import cache_stats  # noqa: E402
 
 cache_stats.main()
 S = json.load(open(os.path.join(HERE, "pilot", "appcache_stats.json")))
-RED, LRED, ORG, LORG, BLUE, GRAY = "#b2182b", "#f4b6b6", "#d6604d", "#fbd3c4", "#2166ac", "#9e9e9e"
-plt.rcParams.update({"font.size": 7, "font.family": "serif", "axes.linewidth": 0.6,
-                     "pdf.fonttype": 42, "ps.fonttype": 42})
+# Okabe-Ito (color-blind safe): vermillion and reddish purple with light tints, blue, sky blue, gray
+RED, LRED, ORG, LORG, BLUE, GRAY = "#D55E00", "#F3C3A0", "#CC79A7", "#EED3E3", "#0072B2", "#999999"
+plt.rcParams.update({"font.size": 7, "font.family": "serif", "font.serif": ["Times New Roman", "STIXGeneral"], "mathtext.fontset": "stix",
+                     "axes.linewidth": 0.6, "pdf.fonttype": 42, "ps.fonttype": 42})  # Times-like, as the body text; embed TrueType
 fig = plt.figure(figsize=(7.0, 2.15))
 gs = fig.add_gridspec(1, 3, width_ratios=[1.25, 0.95, 1.5], wspace=0.28, left=0.055, right=0.995, bottom=0.2,
                       top=0.74)
@@ -69,7 +70,7 @@ for i, (k, _) in enumerate(mets):
         bx.bar(x, v, w2 * 0.9, color=col, zorder=2)
         bx.text(x, v + 1.5, f"{v:.0f}", ha="center", va="bottom", fontsize=5.0)
 bx.set_xticks(range(len(mets)))
-bx.set_xticklabels([n for _, n in mets], fontsize=6.3)
+bx.set_xticklabels([n for _, n in mets], fontsize=6.3, linespacing=1.3)
 style(bx, "sessions (%)", (0, 108), "(b) effect on sessions")
 bx.set_yticks([0, 25, 50, 75, 100])
 bx.legend(handles=[Patch(color=c, label=l) for _, c, l in cfgs], loc="lower center", bbox_to_anchor=(0.5, 1.09),
@@ -79,7 +80,7 @@ bx.legend(handles=[Patch(color=c, label=l) for _, c, l in cfgs], loc="lower cent
 CD = json.load(open(os.path.join(HERE, "pilot", "cache_designs.json")))
 cx = fig.add_subplot(gs[0, 2])
 keys = [("shared", LRED, "request"), ("user", GRAY, "request+user"), ("scope", BLUE, "request+scope"),
-        ("below", "#67a9cf", "below gateway")]
+        ("below", "#56B4E9", "below gateway")]
 w3 = 0.2
 for i, k in enumerate(("1", "3", "9")):
     for j, (x, col, _) in enumerate(keys):

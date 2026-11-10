@@ -510,7 +510,8 @@ def abl_sel(cfg, pred):
 
 
 ABLT = ["\\begin{table}[t]", "\\centering",
-        "\\caption{Prompt ablations (" + ", ".join(dict(MODELS)[m] for m in abl_models) + ", one repetition; \\%). \\E{E3T}/\\E{E3N}+P state the "
+        "\\caption{Stating the scope (+P) cuts misleading answers and false refusals but raises attack leakage; describing "
+        "raw SQL as unfiltered (+T) changes little, and only stating the policy as well (+H) lowers attack leakage. Prompt ablations (" + ", ".join(dict(MODELS)[m] for m in abl_models) + ", one repetition; \\%). \\E{E3T}/\\E{E3N}+P state the "
         "user's scope in the prompt; \\E{E4M}+T tells the agent that raw SQL is unfiltered, and \\E{E4M}+H also states the policy. "
         "\\textbf{Bold}: best, \\underline{underline}: second best per column.}",
         "\\label{tab:ablate}", "\\scriptsize", "\\setlength{\\tabcolsep}{2.5pt}", "\\begin{tabular}{lcccccc}", "\\toprule",
@@ -696,18 +697,19 @@ with open(os.path.join(OUT, "numbers.tex"), "w") as f:
 
 
 L = ["\\begin{table*}[t]", "\\centering",
-     "\\caption{Pooled results over four domains, " + {"3": "three", "4": "four"}[N["nModels"]] + " models, and all repetitions (\\%, Wilson 95\\% CI in brackets). "
+     "\\caption{Only session auditing (\\E{E7}, \\E{E8}) removes inference leakage, and \\E{E8}, which adds the coverage note, "
+     "is best in \\mainBestEight{} of the seven quality columns and second in \\mainSecondEight{}. "
+     "Pooled results over four domains, " + {"3": "three", "4": "four"}[N["nModels"]] + " models, and all repetitions (\\%, Wilson 95\\% CI in brackets). "
      "Leak = answer leakage on attacks (A1--A4); Inf.\\ = inference leakage (Def.~3) in differencing sessions (A3); "
      "Trace = noninterference violations (Def.~2) over all sessions; Mislead = Truman-misleading rate on B2. "
-     "Wilson intervals are per session; template-clustered intervals for key differences are given in the text. "
-     "Cost columns are per session (Calls: LLM calls); latency is original LLM latency plus tool time. $^\\ddagger$Zero by construction: the "
+     "Cost columns are per session (Calls: LLM calls). $^\\ddagger$Zero by construction: the "
      "auditor applies the test of Def.~3 before every release. \\E{E3D} (same grid) is reported apart from the nine "
      "configurations of Fig.~\\ref{fig:tradeoff}. Per column, \\textbf{bold} marks the best and \\underline{underline} the "
      "second-best printed value among the nine (ties share the mark); B/S counts the seven quality columns left of the "
      "bar in which a configuration is best/second.}",
      "\\label{tab:main}", "\\small", "\\setlength{\\tabcolsep}{2.9pt}",
-     "\\begin{tabular}{lccccccc|cccc|c}", "\\toprule",
-     " & Benign acc. & False ref. & B2 mislead & B2 corr. & Leak & Inf. (A3) & Trace & Tokens & \\$\\,$\\times10^{-3}$ & Calls & Lat.\\,(s) & B/S\\\\",
+     "\\begin{tabular}{lccccccc|ccc|c}", "\\toprule",
+     " & Benign acc. & False ref. & B2 mislead & B2 corr. & Leak & Inf. (A3) & Trace & \\$\\,$\\times10^{-3}$ & Calls & Lat.\\,(s) & B/S\\\\",
      "\\midrule"]
 NAME = {"E0": "prompt", "E2": "verifier", "E6": "guard", "E3T": "rewrite", "E3N": "reject", "E4": "metric",
         "E4M": "metric+SQL", "E7": "audit", "E8": "audit+note", "E3D": "reject-static"}
@@ -715,8 +717,10 @@ _rows3d = [r for r in ALL if r["cfg"] == "E3D" and r["model"] in BAL_MODELS and 
 _mrows = []
 for c in CFGS + ["E3D"]:
     if c == "E3D":
-        _mk, _cnt = mark_rows(_mrows, [+1, -1, -1, +1, -1, -1, -1, -1, -1, -1, -1], count_cols=range(7))
+        _mk, _cnt = mark_rows(_mrows, [+1, -1, -1, +1, -1, -1, -1, -1, -1, -1], count_cols=range(7))
         L += [r[:-2] + f" & {b}/{t}\\\\" for r, (b, t) in zip(_mk, _cnt)]
+        assert all("0.0" in r.split("&")[6] or "0$" in r.split("&")[6] or r.split("&")[6].strip().startswith("\\textbf{0}")
+                   for r in _mk[-2:]), "E7/E8 inference leakage must be zero"
         N["mainBestEight"], N["mainSecondEight"] = str(_cnt[CFGS.index("E8")][0]), str(_cnt[CFGS.index("E8")][1])
         N["mainBestSeven"], N["mainSecondSeven"] = str(_cnt[CFGS.index("E7")][0]), str(_cnt[CFGS.index("E7")][1])
         L.append("\\midrule")
@@ -728,7 +732,7 @@ for c in CFGS + ["E3D"]:
     inf = cell(_s(a3), "secrecy") + ("$^\\ddagger$" if c in ("E7", "E8") else "")
     _row = (f"\\E{{{c}}} {NAME[c]} & {cell(_s(ben), 'correct', True)} & {cell(_s(ben), 'refused')} & "
             f"{cell(_s(b2), 'misleading')} & {cell(_s(b2), 'correct')} & {cell(_s(att), 'leak', True)} & "
-            f"{inf} & {cell(R, 'ni')} & {sum(r['tok'] for r in R) / n:,.0f} & "
+            f"{inf} & {cell(R, 'ni')} & "
             f"{1000 * sum(r['usd'] for r in R) / n:.2f} & {sum(r['n_llm'] for r in R) / n:.1f} & {sum(r['wall'] for r in R) / n:.1f}\\\\")
     if c == "E3D":
         L.append(_row[:-2] + " & \\\\")
@@ -752,6 +756,10 @@ for c in CFGS:
         f"{cell(sel(c, ben, dom=d), 'correct')} / {cell(sel(c, att, dom=d), 'leak')} / {cell(sel(c, a3, dom=d), 'secrecy')} / "
         f"{cell(sel(c, b2, dom=d), 'misleading')}" for d, _ in DOMS) + "\\\\")
 _mk, _cnt = mark_rows(_dr, [[+1, -1, -1, -1]] * len(DOMS), sep=" / ")
+assert all(_cnt[CFGS.index("E8")][0] >= b for b, _ in _cnt)  # E8 leads the best counts
+assert all(r.count("\\textbf{0} / \\textbf{0}") == len(DOMS) for r in _mk[-2:])  # E7, E8: zero attack and inference leakage
+L[2] = L[2].replace("\\caption{", "\\caption{In every domain, \\E{E7} and \\E{E8} are best on attack and inference "
+                    "leakage, and \\E{E8} has the most best values. ")
 L += [r[:-2] + f" & {b}/{t}\\\\" for r, (b, t) in zip(_mk, _cnt)]
 L += ["\\bottomrule", "\\end{tabular}", "\\end{table*}"]
 open(os.path.join(OUT, "tab_dom.tex"), "w").write("\n".join(L) + "\n")
@@ -765,16 +773,14 @@ _all3 = [_nm[m] for m, (b, o) in _reps.items() if b == 3]
 _part = [_nm[m] for m, (b, o) in _reps.items() if b == 1 and o == 3]
 _one = [_nm[m] for m, (b, o) in _reps.items() if b == 1 and o == 1]
 _and = lambda xs: ", ".join(xs[:-1]) + (", and " if len(xs) > 2 else " and ") + xs[-1] if len(xs) > 1 else "".join(xs)  # noqa: E731
-REPS_NOTE = (_and(_all3) + " run three repetitions" + ("; " + _and(_part) + " run three repetitions of \\E{E0}, \\E{E3T}, \\E{E4M}, \\E{E7}, and \\E{E8} on all "
-             "but the in-scope questions (B1), and one otherwise" if _part else "") + ("; " + _and(_one) + (" runs" if len(_one) == 1 else " run") + " one repetition of " + "\\E{E0}, \\E{E3T}, \\E{E4M}, \\E{E7}, and \\E{E8}" if _one else "")
-             + "; Kimi (gw) is Kimi-K2.6 served through the organization's gateway and runs one repetition of \\E{E0} and \\E{E3T} on TPC-H and "
-             "BIRD only; -- marks configurations a model did not run.")
+assert _all3 and _part and _one  # the repetitions of each group are given in Section IV
+REPS_NOTE = ("Repetitions as in Section~\\ref{sec:bench}; Kimi (gw) is Kimi-K2.6 served through the organization's gateway "
+             "(\\E{E0} and \\E{E3T} on TPC-H and BIRD, one repetition); -- marks configurations a model did not run.")
 L = ["\\begin{table*}[t]", "\\centering",
      "\\caption{Per-model results (\\%): benign accuracy / attack answer leakage / Truman-misleading rate on B2; bottom rows: "
      "inference leakage on differencing questions (A3) under \\E{E3T}, answer leakage on their share and explicit variants "
      "under \\E{E0}, and sessions with a trace violation under the shared result caches (\\E{E9}, \\E{E9M}; without a cache: 0 "
-     "for every model). " + REPS_NOTE + " The cache rows run three repetitions for DS-flash, GLM-air, and Kimi, one for "
-     "the others. Per model and metric, \\textbf{bold} marks the best and \\underline{underline} the second-best value among "
+     "for every model). " + REPS_NOTE + " Per model and metric, \\textbf{bold} marks the best and \\underline{underline} the second-best value among "
      "the nine configurations (ties share the mark); B/S counts them over the 21 values of a row.}",
      "\\label{tab:model}", "\\footnotesize", "\\setlength{\\tabcolsep}{4.8pt}",
      "\\begin{tabular}{l" + "c" * len(MODELS) + "c}", "\\toprule", " & " + " & ".join(n for _, n in MODELS) + " & B/S\\\\", "\\midrule"]
@@ -786,6 +792,13 @@ for c in CFGS:
         f"{cell(sel(c, ben, model=m), 'correct')}/{cell(sel(c, att, model=m), 'leak')}/{cell(sel(c, b2, model=m), 'misleading')}"
         for m, _ in MODELS) + "\\\\")
 _mk, _cnt = mark_rows(_pr, [[+1, -1, -1]] * len(MODELS), sep="/")
+_mk = [r.replace("--/--/--", "--") for r in _mk]
+assert all(_cnt[CFGS.index("E8")][0] >= b for b, _ in _cnt)
+_l78 = [x for c in ("E7", "E8") for m, _ in MODELS for x in [cell(sel(c, att, model=m), "leak")] if x != "--"]
+_inf3 = [int(cell(sel("E3T", a3, model=m), "secrecy")) for m, _ in MODELS]
+L[2] = L[2].replace("\\caption{", "\\caption{For every model, \\E{E7} and \\E{E8} keep attack leakage at "
+                    + ("0" if set(_l78) == {"0"} else f"0--{max(map(int, _l78))}") + "\\%, \\E{E8} has the most best values, "
+                    f"and under \\E{{E3T}} differencing determines the protected value in {min(_inf3)}--{max(_inf3)}\\% of A3 sessions. ")
 L += [r[:-2] + f" & {b}/{t}\\\\" for r, (b, t) in zip(_mk, _cnt)]
 L.append("\\midrule")
 L.append("Inf.\\ A3, \\E{E3T} & " + " & ".join(cell(sel("E3T", a3, model=m), "secrecy") for m, _ in MODELS) + " & \\\\")
@@ -813,38 +826,49 @@ open(os.path.join(OUT, "tab_a3.tex"), "w").write("\n".join(L) + "\n")
 
 probes = [("direct", "Direct out-of-scope read"), ("hidden column", "Hidden column"), ("star expansion", "\\texttt{SELECT *} expansion"),
           ("schema-qualified", "Schema-qualified name"), ("CTE shadowing", "Qualified name inside a CTE")]
-L = ["\\begin{table}[t]", "\\centering",
-     "\\caption{LLM-free probes on TPC-H and the production policy model (\\checkmark{} = noninterference violated on either "
-     "domain) and median per-query latency of " + N["nReplay"] + " replayed agent queries (a statement that a configuration rejects "
-     "counts with its decision time).}",
-     "\\label{tab:mech}", "\\scriptsize", "\\setlength{\\tabcolsep}{3pt}", "\\begin{tabular}{lccccc}", "\\toprule",
-     "Probe & \\E{E0} & \\E{E3T} & \\E{E3N} & \\E{E3D} & \\E{E5}$^*$\\\\", "\\midrule"]
+MC = ("E0", "E3T", "E3N", "E3D", "E5")
 
 
 def leak(d, k, c):
     return nat[d]["probes"][k]["ni_leak"] if c == "E5" else mech[f"{d}|{k}|{c}"]["ni_leak"]
 
 
-for k, name in probes + [("information_schema", "Catalog statistics")]:
-    L.append(name + " & " + " & ".join("\\checkmark" if any(leak(d, k, c) for d in ("tpch", "ent")) else "--"
-                                       for c in ("E0", "E3T", "E3N", "E3D", "E5")) + "\\\\")
 ex = mech
 def inferred(c):  # existence is inferred iff the best single-response classifier beats the base rate
     acc, base = (nat["tpch"]["existence"] if c == "E5" else ex[f"tpch|existence-accuracy|{c}"][:2])
     return acc > base
 
 
-L.append("Existence of forbidden facts inferred & " + " & ".join("yes" if inferred(c) else "no" for c in ("E0", "E3T", "E3N", "E3D", "E5")) + "\\\\")
 def recovered(c):
     if c == "E5":
         return all(abs(ex[f"{d}|binsearch|E0"][0] - nat[d]["binsearch"][0]) < 0.02 for d in ("tpch", "ent"))
     return all(abs(ex[f"{d}|binsearch|{c}"][0] - ex[f"{d}|binsearch|{c}"][1]) < 0.02 for d in ("tpch", "ent"))
 
 
-L.append("Exact value recovered & " + " & ".join("yes" if recovered(c) else "no" for c in ("E0", "E3T", "E3N", "E3D", "E5")) + "\\\\")
+# one row per probe that some configuration fails; probes that every configuration passes go to the caption
+viol = {name: [any(leak(d, k, c) for d in ("tpch", "ent")) for c in MC] for k, name in probes + [("information_schema", "Catalog statistics")]}
+viol["Existence of forbidden facts inferred"] = [inferred(c) for c in MC]
+viol["Exact value recovered"] = [recovered(c) for c in MC]
+passed = [n for n, v in viol.items() if not any(v)]
+# the caption's first sentence states what the rows show; check it against the data
+assert all(viol[n][1:] == [False] * 4 for n in ("Direct out-of-scope read", "Hidden column", "\\texttt{SELECT *} expansion"))
+assert [c for c, a, b in zip(MC, viol["Existence of forbidden facts inferred"], viol["Exact value recovered"]) if a and b and c != "E0"] == ["E3N"]
+assert all(viol["Catalog statistics"])
+assert passed == ["Schema-qualified name", "Qualified name inside a CTE"]
+L = ["\\begin{table}[t]", "\\centering",
+     "\\caption{Every deterministic enforcement point blocks direct reads, hidden columns, and \\texttt{SELECT *}, and among "
+     "them only the execution-based check \\E{E3N} lets existence and exact values be inferred; catalog statistics leak at "
+     "every placement. LLM-free probes on TPC-H and the production policy model (\\cmark: protected on both; \\xmark: "
+     "noninterference violated on either; qualified names, also in CTEs, are protected everywhere) and "
+     "latency of " + N["nReplay"] + " replayed agent queries (a rejected statement counts with its decision time).}",
+     "\\label{tab:mech}", "\\scriptsize", "\\setlength{\\tabcolsep}{3pt}", "\\begin{tabular}{lccccc}", "\\toprule",
+     "Probe & \\E{E0} & \\E{E3T} & \\E{E3N} & \\E{E3D} & \\E{E5}$^*$\\\\", "\\midrule"]
+for n, v in viol.items():
+    if n not in passed:
+        L.append(n + " & " + " & ".join("\\xmark" if x else "\\cmark" for x in v) + "\\\\")
 L.append("\\midrule")
-L.append("Median latency (ms) & " + " & ".join(f"{ov[c]['median_ms']:.1f}" for c in ("E0", "E3T", "E3N", "E3D", "E5")) + "\\\\")
-L.append("P95 latency (ms) & " + " & ".join(f"{ov[c]['p95_ms']:.1f}" for c in ("E0", "E3T", "E3N", "E3D", "E5")) + "\\\\")
+L.append("Median latency (ms) & " + " & ".join(f"{ov[c]['median_ms']:.1f}" for c in MC) + "\\\\")
+L.append("P95 latency (ms) & " + " & ".join(f"{ov[c]['p95_ms']:.1f}" for c in MC) + "\\\\")
 L += ["\\bottomrule", "\\end{tabular}", "\\smallskip", "",
       "\\raggedright $^*$Probes on PostgreSQL~16 row-level security with column grants; latencies with secure views in "
       "DuckDB, the engine of the other columns (native RLS: median " + f"{nat['overhead']['median_ratio_rls_vs_owner']:.2f}" +

@@ -17,7 +17,7 @@ from score import load  # noqa: E402
 rows = [r for r in load(os.path.join(HERE, "pilot", "sessions.jsonl"))
         if r["model"] in ("ds-flash", "glm-air", "kimi-k2.6")]  # balanced main grid, as in Table IV
 CFGS = ["E0", "E2", "E6", "E3T", "E3N", "E4", "E4M", "E7", "E8"]
-RED, BLUE, GREEN = "#b2182b", "#2166ac", "#1b7837"
+RED, BLUE, GREEN = "#D55E00", "#0072B2", "#009E73"  # Okabe-Ito: vermillion, blue, bluish green (color-blind safe)
 COL = {c: RED for c in ("E0", "E2", "E6")} | {c: BLUE for c in ("E3T", "E3N", "E4", "E4M")} | \
       {c: GREEN for c in ("E7", "E8")}
 MARK = {"E0": "o", "E2": "s", "E6": "D", "E3T": "^", "E3N": "v", "E4": "<", "E4M": ">", "E7": "P", "E8": "X"}
@@ -40,8 +40,8 @@ for c in CFGS:
               "leak": rate(c, "leak", lambda r: r["cat"].startswith("A")),
               "mis": rate(c, "misleading", lambda r: r["cat"] == "B2")}
 
-plt.rcParams.update({"font.size": 7, "font.family": "serif", "axes.linewidth": 0.6,
-                     "pdf.fonttype": 42, "ps.fonttype": 42})  # embed TrueType, not Type 3
+plt.rcParams.update({"font.size": 7, "font.family": "serif", "font.serif": ["Times New Roman", "STIXGeneral"], "mathtext.fontset": "stix",
+                     "axes.linewidth": 0.6, "pdf.fonttype": 42, "ps.fonttype": 42})  # Times-like, as the body text; embed TrueType
 fig = plt.figure(figsize=(7.0, 2.05))
 gs = fig.add_gridspec(1, 5, width_ratios=[1.0, 3.0, 0.42, 3.0, 1.0], wspace=0.05,
                       left=0.06, right=0.99, bottom=0.17, top=0.83)
@@ -69,7 +69,7 @@ def panel(ax_l, ax_r, xk, yk, off, split):
         a = ax_l if x < split else ax_r
         a.scatter(x, y, s=22, marker=MARK[c], color=COL[c], edgecolor="white", linewidth=0.3, zorder=3)
         dx, dy = off[c]
-        a.annotate(c, (x, y), xytext=(dx, dy), textcoords="offset points", fontsize=6.5, color=COL[c],
+        a.annotate(c, (x, y), xytext=(dx, dy), textcoords="offset points", fontsize=6.5, color="0.15",  # marker color gives the family
                    ha="left" if dx > 0 else ("right" if dx < 0 else "center"), va="center", zorder=4)
 
 
