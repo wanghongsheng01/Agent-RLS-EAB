@@ -4,12 +4,22 @@ come from this file (paper/tools/make_numbers.py reads it)."""
 import glob, json, os
 from collections import defaultdict
 
-from score import judge, load
+from score import judge, load, SUITE
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = {"E9": "E3T", "E9M": "E4", "E9S": "E3T"}
 MODELS = ("ds-flash", "glm-air", "kimi-k2.6")
 DOMS = ("tpch", "tpcds", "bird", "ent")
+
+
+def _shared():
+    """Questions whose wording another principal of the same domain also asks (the cache can serve them across
+    principals by text alone); the rest are reused only when the agents' own statements coincide."""
+    texts = defaultdict(set)
+    for q in SUITE.values():
+        if not q["cat"].startswith("C"):
+            texts[(q["dom"], q["text"])].add(q["p"])
+    return {q["qid"]: len(texts[(q["dom"], q["text"])]) > 1 for q in SUITE.values() if not q["cat"].startswith("C")}
 
 
 def sessions():
@@ -19,14 +29,16 @@ def sessions():
 
 
 def pct(k, n):
-    return round(100 * k / n, 1) if n else None
+    return round(100 * k / n, 4) if n else None
 
 
 def main():
     acc = defaultdict(lambda: defaultdict(int))
+    shared = _shared()
     for s in sessions():
         r = judge(s)
-        keys = ((s["cfg"], "all"), (s["cfg"], r["dom"])) if s["model"] in MODELS else ()  # pooled: main grid only
+        keys = ((s["cfg"], "all"), (s["cfg"], r["dom"]),
+                (s["cfg"], "shared" if shared[s["qid"]] else "unshared")) if s["model"] in MODELS else ()  # main grid
         for key in keys + ((s["cfg"], s["model"]),):
             a = acc[key]
             a["sessions"] += 1

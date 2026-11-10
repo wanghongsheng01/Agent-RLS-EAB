@@ -6,7 +6,7 @@ from collections import defaultdict
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.makedirs(os.path.join(HERE, "paper_out"), exist_ok=True)
 sys.path.insert(0, os.path.join(HERE, "code"))
-from score import load, SUITE, wilson, iter_sessions  # noqa: E402
+from score import load, SUITE, wilson, iter_sessions, judge  # noqa: E402
 
 OUT = os.path.join(HERE, "paper_out")
 ALL = load(os.path.join(HERE, "pilot", "sessions.jsonl"))
@@ -481,6 +481,100 @@ for _q in SUITE.values():
         _texts[(_q["dom"], _q["text"])].add(_q["p"])
 N["nSharedQ"] = str(sum(1 for _q in SUITE.values() if not _q["cat"].startswith("C") and len(_texts[(_q["dom"], _q["text"])]) > 1))
 
+# cache reuse by question overlap (code/cache_stats.py) and safe cache designs (code/cache_designs.py, LLM-free)
+for _c, _n in (("E9", "Nine"), ("E9M", "NineM")):
+    N["cacheNi" + _n + "Shared"], N["cacheNi" + _n + "Unshared"] = _r(CS[f"{_c}|shared"]["ni"]), _r(CS[f"{_c}|unshared"]["ni"])
+import cache_designs  # noqa: E402
+cache_designs.main()
+CD = json.load(open(os.path.join(HERE, "pilot", "cache_designs.json")))
+N["cdScope"], N["cdBelow"] = _r(CD["9"]["scope"]["hit"]), _r(CD["9"]["below"]["hit"])
+N["cdShared"], N["cdSharedDiff"] = _r(CD["9"]["shared"]["hit"]), _r(CD["9"]["shared"]["diff_of_hits"])
+N["cdUser"], N["cdScopeOne"] = _r(CD["9"]["user"]["hit"]), f'{CD["1"]["scope"]["hit"]:.1f}'
+N["cdSafeDiff"] = _r(max(CD[k][x]["diff_of_hits"] for k in CD for x in ("user", "scope", "below")))
+
+# auditor state across sessions (E7P) and static safe subset (E7Z) (code/run_audit.py, code/audit_stats.py)
+import audit_stats  # noqa: E402
+audit_stats.main()
+AU = json.load(open(os.path.join(HERE, "pilot", "audit_stats.json")))
+_au = defaultdict(lambda: [0, 0])
+for _fn in _glob.glob(os.path.join(HERE, "pilot", "auditstate", "*.jsonl")):
+    _cfg = os.path.basename(_fn).split("_")[0]
+    for _l in open(_fn):
+        if _cfg in ("E7P", "E7Z", "E7Zc", "E7PR") or "-C3-" in json.loads(_l)["qid"]:
+            _au["new"][0] += 1
+        _au["all"][0] += 1
+N["nAuditSessions"] = f"{_au['all'][0]:,}".replace(",", "{,}")
+N["nSessions"] = f"{len(ALL) + len(XALL) + _ncache + _au['new'][0]:,}".replace(",", "{,}")
+_tb = [AU[f"E7|{d}"] for d in ("tpch", "bird")]
+N["auHistSession"] = _r(100 * sum(o["hist"] * o["hist_det"] / 100 for o in _tb) / sum(o["hist"] for o in _tb))
+N["auHistSessionAll"], N["auHistTruman"] = _r(AU["E7|all"]["hist_det"]), _r(AU["E3T|all"]["hist_det"])
+N["auHistPrincipal"], N["auHistStatic"] = _r(AU["E7P|all"]["hist_det"]), _r(AU["E7Z|all"]["hist_det"])
+for _c, _n in (("E7", "Session"), ("E7P", "Principal"), ("E7Z", "Static"), ("E7Zc", "StaticC"), ("E7PR", "Strict")):
+    N["auAcc" + _n], N["auMis" + _n] = _r(AU[f"{_c}|all"]["acc"]), _r(AU[f"{_c}|all"]["mis"])
+    N["auDen" + _n], N["auCthree" + _n] = _r(AU[f"{_c}|all"]["ben_denied"]), _r(AU[f"{_c}|all"]["c3_ok"])
+N["auAccDrop"] = str(int(N["auAccPrincipal"]) - int(N["auAccStatic"]))  # difference of the printed values
+N["auAccStaticEnt"], N["auAccPrincipalEnt"] = _r(AU["E7Z|ent"]["acc"]), _r(AU["E7P|ent"]["acc"])
+N["auMisStaticTpch"] = _r(AU["E7Z|tpch"]["mis"])
+_ben = {}
+for _fn in _glob.glob(os.path.join(HERE, "pilot", "auditstate", "*.jsonl")):
+    _cfg, _m, _d, _rp = os.path.basename(_fn)[:-6].split("_")
+    for _l in open(_fn):
+        _s = json.loads(_l); _j = judge(_s)
+        if _j["cat"] in ("B1", "B3"):
+            _ben[(_cfg, _s["qid"], _m, _rp)] = bool(_j["correct"])
+_disc = lambda a, b, va, vb: sum(1 for (c, q, m, rp), v in _ben.items() if c == a and v == va and _ben[(b, q, m, rp)] == vb)  # noqa: E731
+N["auDiscPZ"], N["auDiscZP"] = str(_disc("E7P", "E7Z", True, False)), str(_disc("E7P", "E7Z", False, True))
+N["auDiscPS"] = str(_disc("E7P", "E7", True, False) + _disc("E7P", "E7", False, True))
+N["auDiscPZc"], N["auDiscZcP"] = str(_disc("E7P", "E7Zc", True, False)), str(_disc("E7P", "E7Zc", False, True))
+N["auDiscPR"], N["auDiscRP"] = str(_disc("E7P", "E7PR", True, False)), str(_disc("E7P", "E7PR", False, True))
+N["auHistStrict"], N["auHistStaticC"] = _r(AU["E7PR|all"]["hist_det"]), _r(AU["E7Zc|all"]["hist_det"])
+_hz = json.load(open(os.path.join(HERE, "pilot", "horizon.json")))
+for _k, _n in (("E7P", "P"), ("E7Z", "Z"), ("E7Zc", "Zc")):
+    N["hz" + _n] = _r(_hz["9"][_k]["denied"]); N["hzOne" + _n] = _r(_hz["1"][_k]["denied"])
+N["hzReq"] = f"{_hz['9']['E7P']['requests']:,}".replace(",", "{,}")
+_ia = json.load(open(os.path.join(HERE, "pilot", "infer_all.json")))
+N["iaAuditNonDesig"] = _r(max(_ia[c]["non_designated"] for c in ("E7", "E8")))
+N["iaTrumanNonDesig"] = _r(max(_ia[c]["non_designated"] for c in ("E3T", "E4")))
+
+# auditor cost: logged per-release decision time and the incremental auditor at 1,000 accumulated releases
+_kpi_ms = defaultdict(list)
+for (_q, _c, _m, _rp), _s in S.items():
+    if _c in ("E7", "E8"):
+        _kpi_ms[_q.split("-")[0]] += [c["enf_ms"] for c in _s["calls"] if c["name"] == "company_kpi"]
+_med = {d: sorted(v)[len(v) // 2] for d, v in _kpi_ms.items() if v}
+N["auMsLo"], N["auMsHi"] = f"{min(_med.values()):.1f}", f"{max(_med.values()):.1f}"
+_sc = json.load(open(os.path.join(HERE, "pilot", "audit_scaling.json")))
+N["auIncrChecks"] = f"{_sc['checks']:,}".replace(",", "{,}")
+N["auIncrMismatch"] = str(_sc["mismatches"])
+N["auIncrMsEnt"] = _r(max(v for k, v in _sc["per_release_ms"]["ent"].items() if k in ("100", "1000", "10000")))
+N["auIncrMsTpch"] = f'{_sc["per_release_ms"]["tpch"]["1000"]:.1f}'
+N["auIncrMsEntTenK"] = _r(_sc["per_release_ms"]["ent"].get("10000", float("nan")))
+N["auBasisRows"], N["auHiddenAtoms"] = str(_sc["per_release_ms"]["ent"].get("basis_rows", "")), str(_sc["per_release_ms"]["ent"].get("hidden_atoms", ""))
+
+# nonnegativity bounds under the auditor (code/lp_bounds.py)
+if os.path.exists(os.path.join(HERE, "pilot", "lp_bounds.json")):
+    _lp = json.load(open(os.path.join(HERE, "pilot", "lp_bounds.json")))
+    N["lpSessions"] = f"{_lp['all']['sessions']:,}".replace(",", "{,}")
+    N["lpTight"], N["lpMedWidth"] = _r(_lp["all"]["tight10"]), f"{_lp['all']['median_rel_width']:.1f}"
+    N["lpMinWidth"] = f"{_lp['all']['min_rel_width']:.2f}"
+    N["lpPrule"], N["lpPruleDS"] = f"{_lp['all']['prule10']:.1f}", _r(_lp["tpcds"]["prule10"])
+    N["lpPruleOthers"] = _r(max(_lp[d]["prule10"] for d in ("tpch", "bird", "ent")))
+    N["lpHistP"], N["lpHistPR"] = _r(_lp["hist|E7P"]["prule10"]), _r(_lp["hist|E7PR"]["prule10"])
+    N["lpHistN"] = str(_lp["hist|E7PR"]["sessions"])
+
+# judge control: answers to direct requests under deterministic configurations, where the value is out of reach
+_jca = [k for k in IDX if k[1] in ("E3T", "E3N", "E4", "E7", "E8") and IDX[k]["cat"] in ("A1", "A2")
+        and S[k]["final"].get("answer") is not None and not S[k]["final"].get("refused")]
+N["jcAnswered"], N["jcMatch"] = str(len(_jca)), str(sum(bool(IDX[k]["leak"]) for k in _jca))
+# eight-round cap (sessions with nine LLM calls of the agent; E2/E6 add checker calls and are excluded)
+_capr = defaultdict(lambda: [0, 0])
+for _k in IDX:
+    if _k[1] in ("E2", "E6"):
+        continue
+    _capr[_k[1]][0] += S[_k]["usage"]["n_llm"] >= 9; _capr[_k[1]][1] += 1
+N["capNT"] = _r(100 * _capr["E3N"][0] / _capr["E3N"][1])
+N["capOther"] = _r(max(100 * v[0] / v[1] for c, v in _capr.items() if c != "E3N"))
+
 with open(os.path.join(OUT, "numbers.tex"), "w") as f:
     f.write("% generated by tools/make_numbers.py -- do not edit\n")
     W = {"0": "zero", "1": "one", "2": "two", "3": "three", "4": "four", "5": "five", "6": "six", "7": "seven",
@@ -495,17 +589,28 @@ L = ["\\begin{table*}[t]", "\\centering",
      "Leak = answer leakage on attacks (A1--A4); Inf.\\ = inference leakage (Def.~3) in differencing sessions (A3); "
      "Trace = noninterference violations (Def.~2) over all sessions; Mislead = Truman-misleading rate on B2. "
      "Wilson intervals are per session; template-clustered intervals for key differences are given in the text. "
-     "Cost columns are per session; latency is original LLM latency plus tool time.}",
-     "\\label{tab:main}", "\\small", "\\setlength{\\tabcolsep}{3.2pt}",
+     "Cost columns are per session; latency is original LLM latency plus tool time. $^\\ddagger$Zero by construction: the "
+     "auditor applies the test of Def.~3 before every release. \\E{E3D} (same grid) is reported apart from the nine "
+     "configurations of Fig.~\\ref{fig:tradeoff}.}",
+     "\\label{tab:main}", "\\small", "\\setlength{\\tabcolsep}{2.9pt}",
      "\\begin{tabular}{lccccccc|cccc}", "\\toprule",
      " & Benign acc. & False ref. & B2 mislead & B2 correct & Leak & Inf. (A3) & Trace & Tokens & \\$\\,$\\times10^{-3}$ & LLM calls & Latency (s)\\\\",
      "\\midrule"]
-for c in CFGS:
-    R = sel(c)
+NAME = {"E0": "prompt", "E2": "verifier", "E6": "guard", "E3T": "rewrite", "E3N": "reject", "E4": "metric",
+        "E4M": "metric+SQL", "E7": "audit", "E8": "audit+note", "E3D": "reject-static"}
+_rows3d = [r for r in ALL if r["cfg"] == "E3D" and r["model"] in BAL_MODELS and r["rep"] in (0, 1, 2)]
+for c in CFGS + ["E3D"]:
+    if c == "E3D":
+        L.append("\\midrule")
+        _s = lambda pred=lambda r: True: [r for r in _rows3d if pred(r)]  # noqa: E731
+    else:
+        _s = lambda pred=lambda r: True, c=c: sel(c, pred)  # noqa: E731
+    R = _s()
     n = len(R)
-    L.append(f"\\E{{{c}}} & {cell(sel(c, ben), 'correct', True)} & {cell(sel(c, ben), 'refused')} & "
-             f"{cell(sel(c, b2), 'misleading')} & {cell(sel(c, b2), 'correct')} & {cell(sel(c, att), 'leak', True)} & "
-             f"{cell(sel(c, a3), 'secrecy')} & {cell(R, 'ni')} & {sum(r['tok'] for r in R) / n:,.0f} & "
+    inf = cell(_s(a3), "secrecy") + ("$^\\ddagger$" if c in ("E7", "E8") else "")
+    L.append(f"\\E{{{c}}} {NAME[c]} & {cell(_s(ben), 'correct', True)} & {cell(_s(ben), 'refused')} & "
+             f"{cell(_s(b2), 'misleading')} & {cell(_s(b2), 'correct')} & {cell(_s(att), 'leak', True)} & "
+             f"{inf} & {cell(R, 'ni')} & {sum(r['tok'] for r in R) / n:,.0f} & "
              f"{1000 * sum(r['usd'] for r in R) / n:.2f} & {sum(r['n_llm'] for r in R) / n:.1f} & {sum(r['wall'] for r in R) / n:.1f}\\\\")
 L += ["\\bottomrule", "\\end{tabular}", "\\end{table*}"]
 open(os.path.join(OUT, "tab_main.tex"), "w").write("\n".join(L) + "\n")
@@ -529,12 +634,14 @@ _all3 = [_nm[m] for m, (b, o) in _reps.items() if b == 3]
 _part = [_nm[m] for m, (b, o) in _reps.items() if b == 1 and o == 3]
 _one = [_nm[m] for m, (b, o) in _reps.items() if b == 1 and o == 1]
 _and = lambda xs: ", ".join(xs[:-1]) + (", and " if len(xs) > 2 else " and ") + xs[-1] if len(xs) > 1 else "".join(xs)  # noqa: E731
-REPS_NOTE = (_and(_all3) + " run three repetitions" + ("; " + _and(_part) + " run three on all but the in-scope questions (B1), "
-             "which run once" if _part else "") + ("; " + _and(_one) + (" runs" if len(_one) == 1 else " run") + " one" if _one else "") + ".")
+REPS_NOTE = (_and(_all3) + " run three repetitions" + ("; " + _and(_part) + " run three repetitions of \\E{E0}, \\E{E3T}, \\E{E4M}, \\E{E7}, and \\E{E8} on all "
+             "but the in-scope questions (B1), and one otherwise" if _part else "") + ("; " + _and(_one) + (" runs" if len(_one) == 1 else " run") + " one" if _one else "") + ".")
 L = ["\\begin{table*}[t]", "\\centering",
      "\\caption{Per-model results (\\%): benign accuracy / attack answer leakage / Truman-misleading rate on B2; bottom rows: "
-     "inference leakage on differencing questions (A3) under \\E{E3T}, and answer leakage on their share and explicit variants "
-     "under \\E{E0}. " + REPS_NOTE + "}",
+     "inference leakage on differencing questions (A3) under \\E{E3T}, answer leakage on their share and explicit variants "
+     "under \\E{E0}, and sessions with a trace violation under the shared result caches (\\E{E9}, \\E{E9M}; without a cache: 0 "
+     "for every model). " + REPS_NOTE + " The cache rows run three repetitions for DS-flash, GLM-air, and Kimi, one for "
+     "the others.}",
      "\\label{tab:model}", "\\footnotesize", "\\setlength{\\tabcolsep}{5pt}",
      "\\begin{tabular}{l" + "c" * len(MODELS) + "}", "\\toprule", " & " + " & ".join(n for _, n in MODELS) + "\\\\", "\\midrule"]
 rows_bal = rows
@@ -549,6 +656,8 @@ L.append("Share, \\E{E0} & " + " & ".join(cell(sel("E0", lambda r: a3(r) and r["
                                            for m, _ in MODELS) + "\\\\")
 L.append("Explicit, \\E{E0} & " + " & ".join(cell(sel("E0", lambda r: a3(r) and r["qid"].endswith("-0"), model=m), "leak")
                                               for m, _ in MODELS) + "\\\\")
+for _c in ("E9", "E9M"):
+    L.append(f"Trace, \\E{{{_c}}} & " + " & ".join(f"{CS[f'{_c}|{m}']['ni']:.0f}" for m, _ in MODELS) + "\\\\")
 L += ["\\bottomrule", "\\end{tabular}", "\\end{table*}"]
 open(os.path.join(OUT, "tab_model.tex"), "w").write("\n".join(L) + "\n")
 rows = rows_bal
@@ -568,7 +677,8 @@ probes = [("direct", "Direct out-of-scope read"), ("hidden column", "Hidden colu
           ("schema-qualified", "Schema-qualified name"), ("CTE shadowing", "Qualified name inside a CTE")]
 L = ["\\begin{table}[t]", "\\centering",
      "\\caption{LLM-free probes on TPC-H and the production policy model (\\checkmark{} = noninterference violated on either "
-     "domain) and median per-query latency of " + N["nReplay"] + " replayed agent queries.}",
+     "domain) and median per-query latency of " + N["nReplay"] + " replayed agent queries (a statement that a configuration rejects "
+     "counts with its decision time).}",
      "\\label{tab:mech}", "\\scriptsize", "\\setlength{\\tabcolsep}{3pt}", "\\begin{tabular}{lccccc}", "\\toprule",
      "Probe & \\E{E0} & \\E{E3T} & \\E{E3N} & \\E{E3D} & \\E{E5}$^*$\\\\", "\\midrule"]
 

@@ -4,8 +4,9 @@ code/cache_stats.py from the released logs; this script runs it first).
 (a) Main grid, per domain: data calls answered from an entry that another principal created, and the part of them
 that returned data outside the requester's view, for the cache over the rewriting gateway (E9) and over the metric
 tool (E9M). (b) Main grid, per session: trace violations, benign accuracy and direct-access leakage without a cache
-(E3T), with the shared cache over the gateway (E9) and with a cache keyed on the principal (E9S). (c) Per model: sessions in
-which the shared cache returned data outside the view (main-grid models: three repetitions; others: one).
+(E3T), with the shared cache over the gateway (E9) and with a cache keyed on the principal (E9S). (c) Data calls served
+from the cache on the uncached gateway's trajectories, by cache key, with 1, 3, or 9 users per role
+(code/cache_designs.py); the dark part of the shared cache's bar returned another scope's result.
 """
 import json, os, sys
 import matplotlib
@@ -74,18 +75,29 @@ bx.set_yticks([0, 25, 50, 75, 100])
 bx.legend(handles=[Patch(color=c, label=l) for _, c, l in cfgs], loc="lower center", bbox_to_anchor=(0.5, 1.09),
           ncol=2, frameon=False, fontsize=5.8, handlelength=1.0, handletextpad=0.3, columnspacing=0.6)
 
-# (c) per model
+# (c) reuse by cache key (LLM-free replay of the E3T trajectories, code/cache_designs.py), k users per role
+CD = json.load(open(os.path.join(HERE, "pilot", "cache_designs.json")))
 cx = fig.add_subplot(gs[0, 2])
-models = [("ds-flash", "DS\nflash"), ("ds-pro", "DS\npro"), ("glm-air", "GLM\nair"), ("glm-5.3", "GLM\n5.3"),
-          ("kimi-k2.6", "Kimi"), ("gpt-6-sol", "GPT-6"), ("claude-opus-5.5", "Claude")]
-w3 = 0.38
-for i, (m, _) in enumerate(models):
-    for j, (cfg, col) in enumerate((("E9", RED), ("E9M", ORG))):
-        cx.bar(i + (j - 0.5) * (w3 + 0.02), S[f"{cfg}|{m}"]["ni"], w3, color=col, zorder=2)
-cx.set_xticks(range(len(models)))
-cx.set_xticklabels([n for _, n in models], fontsize=6.2)
-style(cx, "sessions (%)", (0, 34), "(c) trace violations per model")
-cx.legend(handles=[Patch(color=RED, label="E9"), Patch(color=ORG, label="E9M")], loc="lower center",
-          bbox_to_anchor=(0.5, 1.09), ncol=2, frameon=False, fontsize=5.8, handlelength=1.0, handletextpad=0.3)
+keys = [("shared", LRED, "request"), ("user", GRAY, "request+user"), ("scope", BLUE, "request+scope"),
+        ("below", "#67a9cf", "below gateway")]
+w3 = 0.2
+for i, k in enumerate(("1", "3", "9")):
+    for j, (x, col, _) in enumerate(keys):
+        o = CD[k][x]
+        xx = i + (j - 1.5) * w3
+        if x == "shared":  # stacked: another scope's result at the bottom, correct reuse above it
+            wrong = o["hit"] * o["diff_of_hits"] / 100
+            cx.bar(xx, wrong, w3 * 0.92, color=RED, zorder=2)
+            cx.bar(xx, o["hit"] - wrong, w3 * 0.92, bottom=wrong, color=col, zorder=2)
+        else:
+            cx.bar(xx, o["hit"], w3 * 0.92, color=col, zorder=2)
+        cx.text(xx, o["hit"] + 0.8, f"{o['hit']:.0f}", ha="center", va="bottom", fontsize=4.6)
+cx.set_xticks(range(3))
+cx.set_xticklabels(["1", "3", "9"], fontsize=6.3)
+cx.set_xlabel("users per role", labelpad=1)
+style(cx, "data calls served (%)", (0, 66), "(c) reuse by cache key, per role")
+cx.legend(handles=[Patch(color=c, label=l) for _, c, l in keys] + [Patch(color=RED, label="other scope")],
+          loc="lower center", bbox_to_anchor=(0.5, 1.09), ncol=3, frameon=False, fontsize=5.8, handlelength=1.0,
+          handletextpad=0.3, columnspacing=0.6)
 fig.savefig(os.path.join(HERE, "paper_out", "fig_cache.pdf"))
 print({k: S[k] for k in ("E9|all", "E9M|all", "E9S|all")})

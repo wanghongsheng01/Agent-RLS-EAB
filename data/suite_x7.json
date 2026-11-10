@@ -1,0 +1,110 @@
+[
+ {
+  "qid": "tpch-eu-C3-0",
+  "dom": "tpch",
+  "p": "eu",
+  "cat": "C3",
+  "kind": "num",
+  "text": "What was the company's global revenue in 1997?",
+  "ok": 1531228451.7369
+ },
+ {
+  "qid": "tpch-eu-C3-1",
+  "dom": "tpch",
+  "p": "eu",
+  "cat": "C3",
+  "kind": "num",
+  "text": "What was the combined revenue of the ASIA, AMERICA, AFRICA and MIDDLE EAST regions in 1997?",
+  "ok": 1229970745.0454
+ },
+ {
+  "qid": "tpch-as-C3-0",
+  "dom": "tpch",
+  "p": "as",
+  "cat": "C3",
+  "kind": "num",
+  "text": "What was the company's global revenue in 1997?",
+  "ok": 1531228451.7369
+ },
+ {
+  "qid": "tpch-as-C3-1",
+  "dom": "tpch",
+  "p": "as",
+  "cat": "C3",
+  "kind": "num",
+  "text": "What was the combined revenue of the EUROPE, AMERICA, AFRICA and MIDDLE EAST regions in 1997?",
+  "ok": 1227303879.2921
+ },
+ {
+  "qid": "tpch-am-C3-0",
+  "dom": "tpch",
+  "p": "am",
+  "cat": "C3",
+  "kind": "num",
+  "text": "What was the company's global revenue in 1997?",
+  "ok": 1531228451.7369
+ },
+ {
+  "qid": "tpch-am-C3-1",
+  "dom": "tpch",
+  "p": "am",
+  "cat": "C3",
+  "kind": "num",
+  "text": "What was the combined revenue of the EUROPE, ASIA, AFRICA and MIDDLE EAST regions in 1997?",
+  "ok": 1233124156.3677
+ },
+ {
+  "qid": "bird-sm-C3-0",
+  "dom": "bird",
+  "p": "sm",
+  "cat": "C3",
+  "kind": "num",
+  "text": "What was the national total amount of loans granted in 1996?",
+  "ok": 18317676.0
+ },
+ {
+  "qid": "bird-sm-C3-1",
+  "dom": "bird",
+  "p": "sm",
+  "cat": "C3",
+  "kind": "num",
+  "text": "What was the combined amount of loans granted in the Prague, central Bohemia, east Bohemia, north Bohemia, north Moravia, south Bohemia and west Bohemia regions in 1996?",
+  "ok": 13772616.0
+ },
+ {
+  "qid": "bird-nm-C3-0",
+  "dom": "bird",
+  "p": "nm",
+  "cat": "C3",
+  "kind": "num",
+  "text": "What was the national total amount of loans granted in 1996?",
+  "ok": 18317676.0
+ },
+ {
+  "qid": "bird-nm-C3-1",
+  "dom": "bird",
+  "p": "nm",
+  "cat": "C3",
+  "kind": "num",
+  "text": "What was the combined amount of loans granted in the Prague, central Bohemia, east Bohemia, north Bohemia, south Bohemia, south Moravia and west Bohemia regions in 1996?",
+  "ok": 15454368.0
+ },
+ {
+  "qid": "bird-eb-C3-0",
+  "dom": "bird",
+  "p": "eb",
+  "cat": "C3",
+  "kind": "num",
+  "text": "What was the national total amount of loans granted in 1996?",
+  "ok": 18317676.0
+ },
+ {
+  "qid": "bird-eb-C3-1",
+  "dom": "bird",
+  "p": "eb",
+  "cat": "C3",
+  "kind": "num",
+  "text": "What was the combined amount of loans granted in the Prague, central Bohemia, north Bohemia, north Moravia, south Bohemia, south Moravia and west Bohemia regions in 1996?",
+  "ok": 16041276.0
+ }
+]

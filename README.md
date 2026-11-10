@@ -23,11 +23,18 @@ tool calls over governed relational data, and an application-layer result cache 
 | `code/overhead_scale.py` | Overhead replay on TPC-H at SF 0.05, 1 and 5 |
 | `code/suite_x6.py` | Generator of the follow-up questions C1 and C2 |
 | `code/appcache.py`, `code/run_cache.py`, `code/cache_stats.py` | Application-layer result cache (E9: shared, keyed on the SQL text, over E3T; E9M: shared, keyed on the metric request, over E4; E9S: keyed on the principal as well), its sequential stream driver, and its statistics |
+| `code/suite_x7.py`, `code/run_audit.py`, `code/audit_stats.py` | Split complement questions C3; streams of each domain's sessions per model and repetition for E3T, the per-session auditor E7, the per-principal auditor E7P, E7P with the isolation rule (E7PR), and the static safe subsets E7Z (finest first) and E7Zc (coarsest first; E7Z' in the paper); history-level statistics |
+| `code/horizon.py` | LLM-free replay of the published-figure requests over long histories: denial rates of E7P, E7Z and E7Zc |
+| `code/infer_all.py` | Inference leakage with every hidden atom (not itself a published group) treated as protected |
+| `code/audit_incr.py`, `code/audit_scaling.py` | Incremental auditor (Proposition 1), its agreement with the rank test and its time per release |
+| `code/cache_designs.py` | LLM-free replay of scope-keyed, per-user and below-gateway caches with 1, 3 or 9 users per role |
+| `code/lp_bounds.py` | Intervals of protected cells under nonnegativity in auditor sessions (needs the databases; result in `logs/lp_bounds.json.gz`) |
 | `code/run_*.sh` | Run scripts for every experiment |
 | `paper_tools/` | Scripts that generate every number, table and figure of the paper |
-| `data/suite.json`, `data/suite_x6.json` | The 169 questions with ground truth; the 15 follow-up questions C1 (complement differencing) and C2 (own group total) |
+| `data/suite.json`, `data/suite_x6.json`, `data/suite_x7.json` | The 169 questions with ground truth; the 15 follow-up questions C1 (complement differencing) and C2 (own group total); the 12 split complement questions C3 |
 | `logs/sessions*.jsonl.gz` | Every agent session: tool calls, arguments, responses, final answers, tokens, cost, latency |
 | `logs/appcache.tar.gz` | Sessions of the cache configurations, one file per stream (configuration, model, domain, repetition), and cache statistics |
+| `logs/auditstate.tar.gz` | Sessions of the auditor-state experiment (E3T, E7, E7P, E7PR, E7Z, E7Zc), one file per stream, with the releases of every session |
 | `logs/llm_cache.tar.gz` | Cached LLM responses: re-running the experiments reproduces all sessions without API calls |
 | `scripts/` | Database preparation |
 
@@ -38,13 +45,13 @@ pip install -r requirements.txt
 python scripts/prepare_bird.py /path/to/bird/dev_databases/financial/financial.sqlite
 python scripts/build_dbs.py
 mkdir -p pilot && for f in logs/*.jsonl.gz logs/*.json.gz; do gunzip -c $f > pilot/$(basename ${f%.gz}); done
-cp data/suite*.json pilot/ && tar -xzf logs/appcache.tar.gz -C pilot
+cp data/suite*.json pilot/ && tar -xzf logs/appcache.tar.gz -C pilot && tar -xzf logs/auditstate.tar.gz -C pilot
 python paper_tools/make_numbers.py && python paper_tools/make_figs.py && python paper_tools/make_fig_cache.py
 ```
 
 To re-run the agents from the cache, extract `logs/llm_cache.tar.gz` into the package root and run
-`code/run_grid.sh` (and `code/run_cache.py` for the cache configurations, whose sessions run sequentially per stream in a
-fixed shuffled order). Every LLM request is served from the cache. To run new models, set `LLM_KEYS_JSON` to a JSON file
+`code/run_grid.sh` (and `code/run_cache.py` and `code/run_audit.py` for the cache and auditor-state configurations, whose
+sessions run sequentially per stream in a fixed shuffled order). Every LLM request is served from the cache. To run new models, set `LLM_KEYS_JSON` to a JSON file
 of the form `{"<provider>": {"base_url": ..., "api_key": ...}}` and extend `MODELS` in `code/llm.py`.
 
 ## Models and logs
@@ -62,6 +69,7 @@ of the form `{"<provider>": {"base_url": ..., "api_key": ...}}` and extend `MODE
 | `sessions_external.jsonl` | E2X and E6X: GPT-6 as verifier and output guard of the DeepSeek-V4-flash and Kimi-K2.6 agents | 1 |
 | `sessions_e3d.jsonl` | E3D, the data-independent non-Truman check (static scope implication plus rewrite), main grid | 3 |
 | `appcache/E9*_<model>_<domain>_r<rep>.jsonl` | E9, E9M and E9S, main grid (3 repetitions); E9 and E9M for DeepSeek-V4-pro, GLM-5.3, GPT-6 and Claude-Opus-5.5 | 3; 1 |
+| `auditstate/<cfg>_<model>_<domain>_r<rep>.jsonl` | E3T, E7, E7P, E7PR, E7Z and E7Zc on all questions including C1--C3, one shuffled stream per model and repetition, main grid | 3 |
 | `sessions_e5p.jsonl` | E5P, PostgreSQL 16 row-level security in the agent loop (TPC-H, production policy model), main grid; needs the databases built by `code/native_rls.py` | 3 |
 
 Files whose name contains `side`, and the partial runs above, come from parallel runs (some walking the grid in reverse

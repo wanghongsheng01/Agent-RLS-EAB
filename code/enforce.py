@@ -24,7 +24,7 @@ from domains import DOMAINS, inlist, PILOT
 MAX_ROWS, MAX_CHARS, TIMEOUT = 50, 4000, 20
 CONFIGS = ["E0", "E2", "E6", "E3T", "E3N", "E4", "E4M", "E7", "E8"]
 # ablations: same mechanisms, different system prompt (scope stated / honest description of the raw SQL tool)
-ABLATION_BASE = {"E3TP": "E3T", "E3NP": "E3N", "E4MH": "E4M", "E4MT": "E4M", "E8P": "E8", "E7S": "E3T", "E2X": "E2", "E6X": "E6", "E3D": "E3N", "E5P": "E3T"}
+ABLATION_BASE = {"E3TP": "E3T", "E3NP": "E3N", "E4MH": "E4M", "E4MT": "E4M", "E8P": "E8", "E7S": "E3T", "E2X": "E2", "E6X": "E6", "E3D": "E3N", "E5P": "E3T", "E7P": "E7", "E7Z": "E3T", "E7Zc": "E3T", "E7PR": "E7"}
 _local = threading.local()
 
 
@@ -95,6 +95,7 @@ class Executor:
         self.filtered = dom.filtered(p, src=self.schema)
         self.hidden = dom.hidden(p)
         self.releases = []  # KPI releases actually returned: (scope, periods, metric)
+        self.prior = []  # E7P: releases of the principal's earlier sessions (auditor state kept per principal)
 
     # ---------------------------------------------------------------- tools offered to the agent
     def tools(self):
@@ -350,9 +351,16 @@ class Executor:
             # static rule: never release the principal's own group total (no session state)
             return json.dumps({"error": "AuditDenied: releasing this figure in your session would, combined with "
                                         "data you can access, reveal restricted figures"})
+        if self.variant in ("E7Z", "E7Zc") and scope not in safe_scopes(d, self.p, coarse_first=self.variant == "E7Zc"):
+            # static safe subset: the published scopes that, released together for every period, determine nothing
+            return json.dumps({"error": "AuditDenied: releasing this figure in your session would, combined with "
+                                        "data you can access, reveal restricted figures"})
         if self.cfg in ("E7", "E8"):
             t = time.perf_counter()
-            bad = determined(d, self.p, self.releases + [parsed])
+            bad = determined(d, self.p, self.prior + self.releases + [parsed])
+            if not bad and self.variant == "E7PR":  # stricter rule: no cell pinned down together with one hidden atom
+                from audit_incr import isolated
+                bad = isolated(d, self.p, [r for r in self.prior + self.releases + [parsed] if r[2] == parsed[2]])
             meta["enf_ms"] += (time.perf_counter() - t) * 1000
             if bad:
                 return json.dumps({"error": "AuditDenied: releasing this figure in your session would, combined with "
@@ -511,6 +519,26 @@ def _release_vec(d, p, rel, idx):
             if (pc, per) in idx:  # periods outside the instance contribute nothing
                 v[idx[(pc, per)]] = 1.0  # a projected cell is fully inside every KPI scope that touches it
     return v
+
+
+_safe = {}
+
+
+def safe_scopes(d, p, coarse_first=False):
+    """Static, data-independent maximal safe subset of the published channel for principal p (E7Z): scopes are added
+    from the finest to the coarsest (fewest cells first) as long as releasing all added scopes, for one period and
+    every metric, determines no protected functional (E7Zc: from the coarsest to the finest, ties by name). Periods are independent linear systems with the same structure,
+    and a multi-period release lies in the span of single-period releases, so one period decides every period."""
+    k = (d.name, p, coarse_first)
+    if k not in _safe:
+        per = _cell_index(d, p)[1][0]
+        kept = []
+        sz = (lambda s: -len(d.kpi_cells(s, per))) if coarse_first else (lambda s: len(d.kpi_cells(s, per)))
+        for s in sorted(d.kpi_scopes(), key=lambda s: (sz(s), s)):
+            if not any(determined(d, p, [(x, [per], m) for x in kept + [s]]) for m in d.KPI_METRICS):
+                kept.append(s)
+        _safe[k] = set(kept)
+    return _safe[k]
 
 
 def determined(d, p, releases):

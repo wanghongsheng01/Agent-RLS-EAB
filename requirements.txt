@@ -5,3 +5,4 @@ requests
 matplotlib
 pgserver
 psycopg[binary]
+scipy

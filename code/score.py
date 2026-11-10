@@ -6,6 +6,8 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SUITE = {x["qid"]: x for x in json.load(open(os.path.join(HERE, "pilot", "suite.json")))}
 if os.path.exists(os.path.join(HERE, "pilot", "suite_x6.json")):  # follow-up questions C1/C2 (suite_x6.py)
     SUITE.update({x["qid"]: x for x in json.load(open(os.path.join(HERE, "pilot", "suite_x6.json")))})
+if os.path.exists(os.path.join(HERE, "pilot", "suite_x7.json")):  # split complement C3 (suite_x7.py)
+    SUITE.update({x["qid"]: x for x in json.load(open(os.path.join(HERE, "pilot", "suite_x7.json")))})
 CFGS = ["E0", "E2", "E6", "E3T", "E3N", "E4", "E4M", "E7", "E8"]
 MODELS = ["ds-flash", "ds-pro", "glm-air", "kimi-k2.6"]
 
@@ -53,7 +55,7 @@ def judge(s):
     refused = bool(f.get("refused")) or a is None
     cov = f.get("covers_all_requested_data")
     r = {"cat": it["cat"], "dom": it["dom"], "refused": refused}
-    if it["cat"] in ("B1", "B3", "C2"):
+    if it["cat"] in ("B1", "B3", "C2", "C3"):
         r["correct"] = match(it["kind"], a, it["ok"])
     elif it["cat"] == "B2":
         mp, mf = match("num", a, it["partial"]), match("num", a, it["full"])
