@@ -105,6 +105,14 @@ sessions were re-run and all derived metrics recomputed, so every number in the 
    the auditor. The cell universe was fixed, the 127 affected audited sessions were re-run, and inference leakage was
    recomputed for all sessions.
 
+## Use of AI
+
+The benchmark harness, the enforcement configurations, the synthetic data of the production policy model, and the
+analysis and plotting code in this package were written by Claude Opus 5.5 (Anthropic, through the Claude Code tool)
+under the authors' direction and reviewed by the authors. The LLMs evaluated in the experiments, with their access
+channels and dates, are listed in the AI-generated content acknowledgment of the paper; answers are scored by
+deterministic rules (`code/score.py`), not by an LLM.
+
 ## Data and ethics
 
 TPC-H and TPC-DS are generated with the DuckDB extensions; BIRD `financial` is public. The enterprise domain contains
